@@ -202,6 +202,8 @@ function renderInfoForm(live) {
       target = { id: newId(), items: [], memo: '', createdAt: Date.now() };
       lives.push(target);
     }
+    // アーティスト名を変えたら曲一覧の紐づけもやり直す
+    if (target.artist !== values.artist.trim()) delete target.catalogArtist;
     Object.assign(target, {
       artist: values.artist.trim(),
       title: values.title.trim(),
@@ -243,12 +245,14 @@ function renderEditor(live) {
     </div>
     <div class="add-bar">
       <div class="inner">
+        <ul class="suggest" id="suggest" hidden></ul>
         <div class="types" role="group" aria-label="追加する種類">
           <button type="button" data-type="song">♪ 曲</button>
           <button type="button" data-type="mc">💬 MC</button>
           <button type="button" data-type="encore">★ アンコール</button>
         </div>
         <form class="row" id="add-form">
+          <button type="button" class="secondary list-btn" data-action="open-picker">曲一覧</button>
           <input class="grow" id="add-input" autocomplete="off" enterkeyhint="done">
           <button type="submit">追加</button>
         </form>
@@ -258,30 +262,249 @@ function renderEditor(live) {
   renderSetlist(live);
   setAddType(addType);
   autoGrow(document.getElementById('overall'));
+  ensureCatalog(live);
 
   document.getElementById('add-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const input = document.getElementById('add-input');
     const title = input.value.trim();
     if (addType === 'song' && !title) { input.focus(); return; }
-    live.items.push({ id: newId(), type: addType, title: addType === 'encore' ? '' : title, memo: '' });
-    saveSoon(live);
+    addItem(live, addType, addType === 'encore' ? '' : title);
     input.value = '';
-    renderSetlist(live);
+    renderSuggest();
     if (addType !== 'song') setAddType('song');
     input.focus();
-    document.getElementById('setlist').lastElementChild?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
+}
+
+function addItem(live, type, title) {
+  live.items.push({ id: newId(), type, title, memo: '' });
+  saveSoon(live);
+  renderSetlist(live);
+  document.getElementById('setlist').lastElementChild?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 function setAddType(type) {
   addType = type;
   document.querySelectorAll('.add-bar [data-type]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.type === type)));
   const input = document.getElementById('add-input');
-  input.placeholder = { song: '曲名を入力', mc: 'MCの話題（あとで書いてもOK）', encore: '' }[type];
+  input.placeholder = { song: '曲名を入力 or 一覧から選ぶ', mc: 'MCの話題（あとで書いてもOK）', encore: '' }[type];
   input.hidden = type === 'encore';
-  input.closest('form').querySelector('button').textContent = type === 'encore' ? 'アンコールの区切りを追加' : '追加';
+  document.querySelector('[data-action="open-picker"]').hidden = type !== 'song';
+  input.closest('form').querySelector('[type=submit]').textContent = type === 'encore' ? 'アンコールの区切りを追加' : '追加';
+  renderSuggest();
 }
+
+/* ===== アーティストの曲一覧（Apple Music の公開検索APIから取得） ===== */
+
+const CATALOG_PREFIX = 'setlist-note:catalog:';
+const CATALOG_TTL = 7 * 24 * 60 * 60 * 1000;
+
+// 曲一覧の状態（表示中のライブのもの）
+const catalog = { liveId: null, status: 'idle', artist: null, songs: [] };
+
+async function itunes(path, params) {
+  const q = new URLSearchParams({ country: 'JP', lang: 'ja_jp', ...params });
+  const res = await fetch(`https://itunes.apple.com/${path}?${q}`);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return (await res.json()).results || [];
+}
+
+// 表記ゆれを吸収した比較用の文字列（全角半角・大小文字・カタカナ/ひらがな・記号）
+function normTitle(s) {
+  return String(s).normalize('NFKC').toLowerCase()
+    .replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60))
+    .replace(/[\s・'’"“”!?.,、。~〜\-_/:;()（）[\]「」『』]/g, '');
+}
+
+// "(Remastered 2020)" や "(Live)" などの付記は外して1曲にまとめる
+function cleanTitle(t) {
+  return t.replace(/\s*[(\[（［][^)\]）］]*\b(?:remaster(?:ed)?|live)\b[^)\]）］]*[)\]）］]/gi, '').trim();
+}
+
+const isExtraTrack = (t) => /instrumental|karaoke|off vocal|backing track|\(inst\.?\)|カラオケ/i.test(t);
+
+async function findArtists(name) {
+  const results = await itunes('search', { term: name, entity: 'musicArtist', limit: 10 });
+  return results.map((a) => ({ id: a.artistId, name: a.artistName, genre: a.primaryGenreName || '' }));
+}
+
+async function fetchSongs(artist) {
+  const cacheKey = CATALOG_PREFIX + artist.id;
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey));
+    if (cached && Date.now() - cached.at < CATALOG_TTL) return cached.songs;
+  } catch { /* キャッシュなし */ }
+
+  // 検索（人気順に近い）と、アーティストIDでの一覧を合わせて取りこぼしを減らす
+  const [searched, looked] = await Promise.all([
+    itunes('search', { term: artist.name, entity: 'song', attribute: 'artistTerm', limit: 200 }).catch(() => []),
+    itunes('lookup', { id: artist.id, entity: 'song', limit: 200 }).catch(() => []),
+  ]);
+  const seen = new Set();
+  const songs = [];
+  for (const r of [...searched.filter((x) => x.artistId === artist.id), ...looked]) {
+    if (r.wrapperType !== 'track' || !r.trackName || isExtraTrack(r.trackName)) continue;
+    const title = cleanTitle(r.trackName);
+    const key = normTitle(title);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    songs.push({ title, year: (r.releaseDate || '').slice(0, 4) });
+  }
+  try { localStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), songs })); } catch { /* 容量不足なら毎回取得 */ }
+  return songs;
+}
+
+async function ensureCatalog(live, force = false) {
+  if (!force && catalog.liveId === live.id && catalog.status !== 'error') return;
+  Object.assign(catalog, { liveId: live.id, status: 'loading', artist: null, songs: [] });
+  renderPicker();
+  try {
+    let artist = live.catalogArtist;
+    if (artist === undefined) {
+      // 名前が完全一致する候補を優先、なければ一番上の候補
+      const found = live.artist ? await findArtists(live.artist) : [];
+      artist = found.find((a) => normTitle(a.name) === normTitle(live.artist)) || found[0] || null;
+      live.catalogArtist = artist && { id: artist.id, name: artist.name };
+      saveSoon(live);
+    }
+    if (catalog.liveId !== live.id) return;
+    if (!artist) { catalog.status = 'none'; renderPicker(); return; }
+    const songs = await fetchSongs(artist);
+    if (catalog.liveId !== live.id) return;
+    Object.assign(catalog, { status: songs.length ? 'ready' : 'none', artist, songs });
+  } catch {
+    if (catalog.liveId === live.id) catalog.status = 'error';
+  }
+  renderPicker();
+  renderSuggest();
+}
+
+function matchSongs(query, limit = Infinity) {
+  const q = normTitle(query);
+  if (!q) return catalog.songs.slice(0, limit);
+  const starts = [];
+  const contains = [];
+  for (const s of catalog.songs) {
+    const n = normTitle(s.title);
+    if (n.startsWith(q)) starts.push(s);
+    else if (n.includes(q)) contains.push(s);
+  }
+  return [...starts, ...contains].slice(0, limit);
+}
+
+// 入力中の曲名に合う候補を入力欄の上に出す
+function renderSuggest() {
+  const ul = document.getElementById('suggest');
+  if (!ul) return;
+  const query = document.getElementById('add-input').value;
+  const hits = addType === 'song' && query.trim() && catalog.status === 'ready' ? matchSongs(query, 5) : [];
+  ul.hidden = hits.length === 0;
+  ul.innerHTML = hits.map((s) => `<li><button type="button" data-pick="${esc(s.title)}">${esc(s.title)}</button></li>`).join('');
+}
+
+/* ===== 曲一覧ダイアログ ===== */
+
+const picker = document.getElementById('picker-dialog');
+const $pickerSearch = document.getElementById('picker-search');
+let pickerMode = 'songs'; // 'songs' | 'artists'
+let artistCandidates = [];
+
+function openPicker() {
+  if (!current) return;
+  pickerMode = 'songs';
+  $pickerSearch.value = '';
+  picker.showModal();
+  ensureCatalog(current);
+  renderPicker();
+}
+
+function renderPicker() {
+  if (!picker.open) return;
+  const live = current;
+  const head = document.getElementById('picker-artist');
+  const status = document.getElementById('picker-status');
+  const list = document.getElementById('picker-list');
+  if (!live) return;
+
+  if (pickerMode === 'artists') {
+    head.textContent = 'アーティストを選ぶ';
+    $pickerSearch.placeholder = 'アーティスト名で検索';
+    status.textContent = artistCandidates.length ? '' : '見つかりませんでした。名前を変えて検索してみてください。';
+    list.innerHTML = artistCandidates.map((a) => `
+      <li><button type="button" class="pick-row" data-artist-id="${a.id}">
+        <span class="grow">${esc(a.name)}</span><span class="hint">${esc(a.genre)}</span>
+      </button></li>`).join('');
+    return;
+  }
+
+  $pickerSearch.placeholder = '曲名で絞り込み';
+  head.textContent = catalog.artist ? `${catalog.artist.name} の曲` : live.artist || '曲一覧';
+  status.textContent = {
+    loading: '曲一覧を読み込み中…',
+    error: '曲一覧を読み込めませんでした。電波の良い場所でもう一度開いてください。',
+    none: `「${live.artist}」の曲が見つかりませんでした。「アーティストを変更」から選び直せます。`,
+    ready: '',
+    idle: '',
+  }[catalog.status];
+  const used = new Set(live.items.filter((i) => i.type === 'song').map((i) => normTitle(i.title)));
+  const hits = catalog.status === 'ready' ? matchSongs($pickerSearch.value) : [];
+  const typed = $pickerSearch.value.trim();
+  list.innerHTML = hits.map((s) => `
+    <li><button type="button" class="pick-row ${used.has(normTitle(s.title)) ? 'used' : ''}" data-pick="${esc(s.title)}">
+      <span class="grow">${esc(s.title)}</span>
+      <span class="hint">${used.has(normTitle(s.title)) ? '追加済み' : esc(s.year)}</span>
+    </button></li>`).join('')
+    + (typed && !hits.some((s) => normTitle(s.title) === normTitle(typed))
+      ? `<li><button type="button" class="pick-row free" data-pick="${esc(typed)}">「${esc(typed)}」をそのまま追加</button></li>`
+      : '');
+}
+
+async function searchArtistCandidates(name) {
+  pickerMode = 'artists';
+  artistCandidates = [];
+  document.getElementById('picker-list').innerHTML = '';
+  document.getElementById('picker-status').textContent = '検索中…';
+  try {
+    artistCandidates = name.trim() ? await findArtists(name) : [];
+  } catch {
+    document.getElementById('picker-status').textContent = '検索できませんでした。電波の良い場所でもう一度試してください。';
+    return;
+  }
+  renderPicker();
+}
+
+let pickerSearchTimer = null;
+$pickerSearch.addEventListener('input', () => {
+  if (pickerMode === 'songs') return renderPicker();
+  clearTimeout(pickerSearchTimer);
+  pickerSearchTimer = setTimeout(() => searchArtistCandidates($pickerSearch.value), 400);
+});
+
+picker.addEventListener('click', (e) => {
+  if (e.target === picker) return picker.close();
+  const pick = e.target.closest('[data-pick]');
+  if (pick && current) {
+    addItem(current, 'song', pick.dataset.pick);
+    toast(`「${pick.dataset.pick}」を追加しました`);
+    renderPicker();
+    return;
+  }
+  const artistBtn = e.target.closest('[data-artist-id]');
+  if (artistBtn && current) {
+    const a = artistCandidates.find((x) => String(x.id) === artistBtn.dataset.artistId);
+    current.catalogArtist = { id: a.id, name: a.name };
+    saveSoon(current);
+    pickerMode = 'songs';
+    $pickerSearch.value = '';
+    ensureCatalog(current, true);
+    return;
+  }
+  if (e.target.closest('[data-action="change-artist"]')) {
+    $pickerSearch.value = current.artist;
+    searchArtistCandidates(current.artist);
+  }
+});
 
 function renderSetlist(live) {
   const nums = numberItems(live.items);
@@ -289,7 +512,7 @@ function renderSetlist(live) {
   document.getElementById('song-count').textContent = `${countSongs(live)}曲`;
   const ol = document.getElementById('setlist');
   ol.innerHTML = live.items.length === 0
-    ? `<li class="empty">下の入力欄から1曲目を追加しましょう。<br><span class="hint">曲とMCを交互に入れていけます。</span></li>`
+    ? `<li class="empty">下の入力欄から1曲目を追加しましょう。<br><span class="hint">曲名を打つと候補が出ます。「曲一覧」からも選べます。</span></li>`
     : live.items.map((it, i) => {
       const controls = `
         <div class="controls">
@@ -643,10 +866,20 @@ $app.addEventListener('click', (e) => {
     if (addType !== 'encore') document.getElementById('add-input').focus();
     return;
   }
+  const pick = e.target.closest('#suggest [data-pick]');
+  if (pick && current) {
+    addItem(current, 'song', pick.dataset.pick);
+    const input = document.getElementById('add-input');
+    input.value = '';
+    renderSuggest();
+    input.focus();
+    return;
+  }
   const btn = e.target.closest('[data-action]');
   if (!btn || btn.tagName === 'INPUT') return;
   const action = btn.dataset.action;
   if (action === 'share') return openShare();
+  if (action === 'open-picker') return openPicker();
   if (action === 'export') return exportBackup();
   if (action === 'save-shared') return saveShared();
   if (action === 'delete-live') {
@@ -668,6 +901,7 @@ $app.addEventListener('click', (e) => {
 $app.addEventListener('input', (e) => {
   const el = e.target;
   if (el.tagName === 'TEXTAREA') autoGrow(el);
+  if (el.id === 'add-input') return renderSuggest();
   if (!current || !getLive(current.id)) return;
   if (el.dataset.field) {
     current[el.dataset.field] = el.value;

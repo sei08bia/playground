@@ -37,6 +37,20 @@
     </form>
   </dialog>
 
+  <dialog id="picker-dialog">
+    <div class="picker-body">
+      <div class="row">
+        <h2 class="grow" id="picker-artist">曲一覧</h2>
+        <button type="button" class="secondary small" data-action="change-artist">アーティストを変更</button>
+      </div>
+      <input id="picker-search" type="search" autocomplete="off" placeholder="曲名で絞り込み">
+      <p id="picker-status" class="hint" role="status"></p>
+      <ul id="picker-list" class="picker-list"></ul>
+      <p class="hint credit">曲の一覧は Apple Music の公開データから取得しています。</p>
+      <form method="dialog"><button class="secondary close-btn">閉じる</button></form>
+    </div>
+  </dialog>
+
   <div id="toast" role="status" aria-live="polite"></div>
 
   <script src="app.js"></script>
