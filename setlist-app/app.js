@@ -100,10 +100,12 @@ function route() {
   const hash = location.hash.replace(/^#\/?/, '');
   const [page, id, sub] = hash.split('/');
   current = null;
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   window.scrollTo(0, 0);
   if (page === 'new') return renderInfoForm(null);
+  if (page === 'playlist' && id === 'new') return renderPlaylistForm(null);
   if (page === 'live' && getLive(id)) {
-    if (sub === 'info') return renderInfoForm(getLive(id));
+    if (sub === 'info') return isPlaylist(getLive(id)) ? renderPlaylistForm(getLive(id)) : renderInfoForm(getLive(id));
     return renderEditor(getLive(id));
   }
   if (page === 'view' && id) return renderShared(id);
@@ -118,6 +120,7 @@ function renderList() {
   $app.innerHTML = `
     <div class="toolbar">
       <a href="#/new" class="button grow-btn">＋ ライブを記録する</a>
+      <a href="#/playlist/new" class="button secondary grow-btn">♫ プレイリストを取り込む</a>
     </div>
     ${list.length === 0 ? `
       <div class="empty">
@@ -128,9 +131,12 @@ function renderList() {
         ${list.map((l) => `
           <li class="card">
             <a href="#/live/${l.id}">
+              ${isPlaylist(l) ? `
+              <div class="date"><span class="badge">プレイリスト</span> ${esc(formatDate(l.date))}</div>
+              <div class="title">${esc(l.title)}</div>` : `
               <div class="date">${esc(formatDate(l.date))}${l.venue ? ' ・ ' + esc(l.venue) : ''}</div>
               <div class="title">${esc(l.artist || '（アーティスト未入力）')}</div>
-              ${l.title ? `<div>${esc(l.title)}</div>` : ''}
+              ${l.title ? `<div>${esc(l.title)}</div>` : ''}`}
               <div class="meta">${countSongs(l)}曲</div>
             </a>
           </li>`).join('')}
@@ -267,6 +273,85 @@ function renderInfoForm(live) {
   });
 }
 
+/* ===== プレイリストの取り込み ===== */
+
+const isPlaylist = (l) => l?.kind === 'playlist';
+
+// 貼り付けたテキストを曲のリストにする。
+// ・Mac のミュージックAppからのコピー（タブ区切り: 名前 / 時間 / アーティスト …）
+// ・「曲名 - アーティスト」「1. 曲名」などの1行1曲
+function parseSongList(text) {
+  const header = new Set(['名前', 'name', '曲名', 'タイトル', 'title']);
+  const out = [];
+  for (const raw of text.split(/\r?\n/)) {
+    let line = raw.trim();
+    if (!line) continue;
+    let title;
+    let artist = '';
+    if (line.includes('\t')) {
+      const cols = line.split('\t').map((c) => c.trim());
+      title = cols[0];
+      // 再生時間や記号の列は飛ばして、次の文字列をアーティストとみなす
+      artist = cols.slice(1).find((c) => c && !/^\d{1,2}:\d{2}(:\d{2})?$/.test(c) && !/^[\d\s♥❤️☆★]*$/.test(c)) || '';
+    } else {
+      line = line.replace(/^\d{1,3}\s*[.)．、:]\s*/, '');
+      const m = line.match(/^(.+?)\s+[-–—/／]\s+(.+)$/);
+      if (m) [, title, artist] = m;
+      else title = line;
+    }
+    if (title && !header.has(title.toLowerCase())) out.push({ title: title.trim(), artist: artist.trim() });
+  }
+  return out;
+}
+
+function renderPlaylistForm(live) {
+  $app.innerHTML = `
+    <h1>${live ? 'プレイリストを編集' : 'プレイリストを取り込む'}</h1>
+    <form class="card" id="pl-form">
+      <label for="pl-title">プレイリスト名</label>
+      <input id="pl-title" name="title" value="${esc(live?.title || '')}" required autocomplete="off">
+      <label for="pl-songs">${live ? '追加する曲' : '曲のリスト'}（1行に1曲。「曲名 - アーティスト」の形ならアーティストも入ります）</label>
+      <textarea id="pl-songs" name="songs" rows="8" placeholder="ここに貼り付け&#10;例）&#10;ライラック - Mrs. GREEN APPLE&#10;アイドル - YOASOBI"></textarea>
+      <p class="hint" id="pl-preview" role="status"></p>
+      <details class="howto">
+        <summary>Apple Musicのプレイリストから曲名をコピーするには</summary>
+        <p><b>Macの場合</b>：ミュージックAppでプレイリストを開き、曲を全部選択（⌘A）してコピー（⌘C）。そのまま上の欄に貼り付けられます。</p>
+        <p><b>iPhoneの場合</b>：ショートカットAppで新しいショートカットを作り、「ミュージックを検索」（フィルタでプレイリストを指定）と「クリップボードにコピー」の2つを並べて実行します。コピーされた曲名を上の欄に貼り付けてください。</p>
+        <p>手で打ち込んでも大丈夫です。</p>
+      </details>
+      <div class="toolbar">
+        <button type="submit">${live ? '保存' : '取り込む'}</button>
+        <a class="button secondary" href="${live ? '#/live/' + live.id : '#/'}">キャンセル</a>
+      </div>
+    </form>
+    ${live ? `<button class="danger" data-action="delete-live" data-id="${live.id}">このプレイリストを削除</button>` : ''}`;
+
+  const form = document.getElementById('pl-form');
+  const preview = document.getElementById('pl-preview');
+  form.songs.addEventListener('input', () => {
+    const songs = parseSongList(form.songs.value);
+    preview.textContent = songs.length
+      ? `${songs.length}曲を読み取りました（1曲目：${songs[0].title}${songs[0].artist ? ' / ' + songs[0].artist : ''}）`
+      : '';
+  });
+  if (!live) form.title.focus();
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const songs = parseSongList(form.songs.value);
+    let target = live;
+    if (!target) {
+      target = { id: newId(), kind: 'playlist', artist: '', venue: '', date: today(), items: [], memo: '', createdAt: Date.now() };
+      lives.push(target);
+    }
+    target.title = form.title.value.trim();
+    target.items.push(...songs.map((s) => ({ id: newId(), type: 'song', title: s.title, memo: '', ...(s.artist ? { artist: s.artist } : {}) })));
+    target.updatedAt = Date.now();
+    saveLives();
+    if (songs.length) toast(`${songs.length}曲を取り込みました`);
+    location.hash = '#/live/' + target.id;
+  });
+}
+
 /* ===== セトリ編集 ===== */
 
 let addType = 'song';
@@ -280,6 +365,15 @@ function avatarHtml(photo, name) {
 const livePhoto = (l) => l.catalogArtist?.photo || l.sharedPhoto || null;
 
 function headerHtml(l) {
+  if (isPlaylist(l)) {
+    return `
+    <div class="header-row">
+      <div class="grow">
+        <div class="meta"><span class="badge">プレイリスト</span> ${esc(formatDate(l.date))}</div>
+        <h1>${esc(l.title)}</h1>
+      </div>
+    </div>`;
+  }
   return `
     <div class="header-row">
       ${livePhoto(l) ? avatarHtml(livePhoto(l), l.artist).replace('class="avatar"', 'class="avatar large"') : ''}
@@ -293,24 +387,25 @@ function headerHtml(l) {
 
 function renderEditor(live) {
   current = live;
+  const pl = isPlaylist(live);
   $app.innerHTML = `
     <section class="view-header card">
       ${headerHtml(live)}
       <div class="toolbar">
         <button data-action="share">シェア</button>
-        <a class="button secondary" href="#/live/${live.id}/info">ライブ情報を編集</a>
+        <a class="button secondary" href="#/live/${live.id}/info">${pl ? '名前の変更・曲の取り込み' : 'ライブ情報を編集'}</a>
       </div>
     </section>
-    <h2>セットリスト <span class="hint" id="song-count"></span></h2>
+    <h2>${pl ? '曲' : 'セットリスト'} <span class="hint" id="song-count"></span></h2>
     <ol class="setlist" id="setlist"></ol>
     <div class="card">
-      <label for="overall">ライブ全体の感想</label>
-      <textarea id="overall" data-field="memo" placeholder="全体を通して感じたこと、演出、客席の雰囲気など">${esc(live.memo)}</textarea>
+      <label for="overall">${pl ? 'プレイリスト全体の感想' : 'ライブ全体の感想'}</label>
+      <textarea id="overall" data-field="memo" placeholder="${pl ? 'このプレイリストについて思うこと' : '全体を通して感じたこと、演出、客席の雰囲気など'}">${esc(live.memo)}</textarea>
     </div>
     <div class="add-bar">
       <div class="inner">
         <ul class="suggest" id="suggest" hidden></ul>
-        <div class="types" role="group" aria-label="追加する種類">
+        <div class="types" role="group" aria-label="追加する種類" ${pl ? 'hidden' : ''}>
           <button type="button" data-type="song">♪ 曲</button>
           <button type="button" data-type="mc">💬 MC</button>
           <button type="button" data-type="encore">★ アンコール</button>
@@ -324,9 +419,10 @@ function renderEditor(live) {
     </div>`;
 
   renderSetlist(live);
-  setAddType(addType);
+  setAddType(pl ? 'song' : addType);
   autoGrow(document.getElementById('overall'));
-  ensureCatalog(live);
+  if (pl) document.querySelector('[data-action="open-picker"]').hidden = true;
+  else ensureCatalog(live);
 
   document.getElementById('add-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -354,7 +450,7 @@ function setAddType(type) {
   const input = document.getElementById('add-input');
   input.placeholder = { song: '曲名を入力', mc: 'MCの話題（あとで書いてもOK）', encore: '' }[type];
   input.hidden = type === 'encore';
-  document.querySelector('[data-action="open-picker"]').hidden = type !== 'song';
+  document.querySelector('[data-action="open-picker"]').hidden = type !== 'song' || (current && isPlaylist(current));
   input.closest('form').querySelector('[type=submit]').textContent = type === 'encore' ? 'アンコールの区切りを追加' : '追加';
   renderSuggest();
 }
@@ -786,7 +882,9 @@ function renderSetlist(live) {
   document.getElementById('song-count').textContent = `${countSongs(live)}曲`;
   const ol = document.getElementById('setlist');
   ol.innerHTML = live.items.length === 0
-    ? `<li class="empty">下の入力欄から1曲目を追加しましょう。<br><span class="hint">曲名を打つと候補が出ます。「曲を選ぶ」からジャケットで選ぶこともできます。</span></li>`
+    ? isPlaylist(live)
+      ? `<li class="empty">曲がまだありません。<br><span class="hint">「名前の変更・曲の取り込み」から貼り付けるか、下の入力欄から追加できます。</span></li>`
+      : `<li class="empty">下の入力欄から1曲目を追加しましょう。<br><span class="hint">曲名を打つと候補が出ます。「曲を選ぶ」からジャケットで選ぶこともできます。</span></li>`
     : live.items.map((it, i) => {
       const controls = `
         <div class="controls">
@@ -805,6 +903,7 @@ function renderSetlist(live) {
             <input class="grow title-input" data-item-field="title" value="${esc(it.title)}" placeholder="${isMc ? '話題（任意）' : '曲名'}" aria-label="${isMc ? 'MCの話題' : '曲名'}">
             ${controls}
           </div>
+          ${it.artist ? `<div class="item-artist">${esc(it.artist)}</div>` : ''}
           <textarea data-item-field="memo" rows="1" placeholder="${isMc ? '何を話していたか' : 'この曲で感じたこと'}">${esc(it.memo)}</textarea>
         </li>`;
     }).join('');
@@ -840,17 +939,18 @@ function renderShared(encoded) {
     current = live;
     const nums = numberItems(live.items);
     $app.innerHTML = `
-      <div class="banner">共有されたセトリです。<a href="#/">自分でも記録する</a></div>
+      <div class="banner">共有された${isPlaylist(live) ? 'プレイリスト' : 'セトリ'}です。<a href="#/">自分でも記録する</a></div>
       <section class="view-header card">${headerHtml(live)}</section>
       <ol class="setlist">
         ${live.items.map((it, i) => it.type === 'encore'
           ? '<li class="item encore">ENCORE</li>'
           : `<li class="item ${it.type}">
               <div class="row"><span class="num">${nums[i]}</span><span class="grow song-title">${esc(it.title)}</span></div>
+              ${it.artist ? `<div class="item-artist">${esc(it.artist)}</div>` : ''}
               <div class="memo">${esc(it.memo)}</div>
             </li>`).join('')}
       </ol>
-      ${live.memo ? `<div class="card"><h2>ライブ全体の感想</h2><div class="overall-memo">${esc(live.memo)}</div></div>` : ''}
+      ${live.memo ? `<div class="card"><h2>${isPlaylist(live) ? 'プレイリスト全体の感想' : 'ライブ全体の感想'}</h2><div class="overall-memo">${esc(live.memo)}</div></div>` : ''}
       <div class="toolbar">
         <button data-action="share">シェア</button>
         <button class="secondary" data-action="save-shared">自分のノートに保存</button>
@@ -893,10 +993,12 @@ async function pipeBytes(bytes, stream) {
 async function encodeLive(live, includeMemo) {
   const compact = {
     a: live.artist, t: live.title, d: live.date, v: live.venue, p: livePhoto(live) || undefined,
+    k: isPlaylist(live) ? 'p' : undefined,
     m: includeMemo ? live.memo : '',
     i: live.items.map((it) => {
       const row = [TYPE_CODES[it.type], it.title || ''];
       if (includeMemo && it.memo) row.push(it.memo);
+      if (it.artist) row[2] = row[2] || '', row.push(it.artist);
       return row;
     }),
   };
@@ -914,8 +1016,11 @@ async function decodeLive(encoded) {
   const c = JSON.parse(new TextDecoder().decode(bytes));
   return {
     artist: c.a || '', title: c.t || '', date: c.d || '', venue: c.v || '', memo: c.m || '',
+    kind: c.k === 'p' ? 'playlist' : undefined,
     sharedPhoto: /^https:\/\/[\w.-]+\.dzcdn\.net\//.test(c.p || '') ? c.p : undefined,
-    items: (c.i || []).map(([t, title, memo]) => ({ id: newId(), type: CODE_TYPES[t] || 'song', title: title || '', memo: memo || '' })),
+    items: (c.i || []).map(([t, title, memo, artist]) => ({
+      id: newId(), type: CODE_TYPES[t] || 'song', title: title || '', memo: memo || '', ...(artist ? { artist } : {}),
+    })),
   };
 }
 
@@ -926,6 +1031,7 @@ async function shareUrl(live, includeMemo) {
 /* ===== テキスト出力 ===== */
 
 function liveHeadline(l) {
+  if (isPlaylist(l)) return `プレイリスト「${l.title}」`;
   return [l.artist, l.title && `「${l.title}」`].filter(Boolean).join(' ');
 }
 
@@ -938,17 +1044,18 @@ function formatText(live, includeMemo) {
       if (!includeMemo && !it.title) return;
       lines.push(`MC${it.title ? '：' + it.title : ''}`);
     } else {
-      lines.push(`${nums[i]}. ${it.title}`);
+      lines.push(`${nums[i]}. ${it.title}${it.artist ? ' / ' + it.artist : ''}`);
     }
     if (includeMemo && it.memo) lines.push(...it.memo.split('\n').map((m) => '　└ ' + m));
   });
   if (includeMemo && live.memo) lines.push('', '【感想】', live.memo);
+  if (isPlaylist(live)) lines.splice(1, 1); // プレイリストは日付・会場の行を出さない
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function postText(live) {
   // X は日本語1文字=2カウント。曲名は入るところまで
-  let text = `${liveHeadline(live)} のセトリ\n`;
+  let text = `${liveHeadline(live)} ${isPlaylist(live) ? 'の感想' : 'のセトリ'}\n`;
   const songs = live.items.filter((i) => i.type === 'song').map((i) => i.title);
   let list = '';
   for (const s of songs) {
@@ -991,9 +1098,14 @@ function renderImage(live, includeMemo) {
     y += size * gap;
   };
 
-  add([formatDate(live.date), live.venue].filter(Boolean).join('  '), { size: 30, color: '#a89fbd' });
-  add(live.artist, { size: 52, weight: 800, color: '#ff5c8a', gap: 0.2 });
-  if (live.title) add(live.title, { size: 40, weight: 700 });
+  if (isPlaylist(live)) {
+    add('PLAYLIST', { size: 30, weight: 700, color: '#a89fbd' });
+    add(live.title, { size: 52, weight: 800, color: '#ff5c8a', gap: 0.2 });
+  } else {
+    add([formatDate(live.date), live.venue].filter(Boolean).join('  '), { size: 30, color: '#a89fbd' });
+    add(live.artist, { size: 52, weight: 800, color: '#ff5c8a', gap: 0.2 });
+    if (live.title) add(live.title, { size: 40, weight: 700 });
+  }
   y += 24;
   ops.push({ rule: true, y });
   y += 20;
@@ -1010,6 +1122,7 @@ function renderImage(live, includeMemo) {
     const color = it.type === 'mc' ? '#3ec6b4' : '#ff5c8a';
     ops.push({ text: nums[i], font: `800 34px ${FONT}`, color, x: P, y: y + 34 * 1.35 });
     add(it.title || '', { size: 34, weight: it.type === 'mc' ? 400 : 700, x: P + numW, maxW: W - P * 2 - numW, gap: 0.25 });
+    if (it.artist) add(it.artist, { size: 26, color: '#a89fbd', x: P + numW, maxW: W - P * 2 - numW, gap: 0.3 });
     if (includeMemo && it.memo) add(it.memo, { size: 27, color: '#c9c1d9', x: P + numW, maxW: W - P * 2 - numW, gap: 0.6 });
   });
 
@@ -1098,7 +1211,7 @@ async function handleShare(kind) {
     $status.textContent = (await copyText(formatText(live, includeMemo))) ? 'テキストをコピーしました' : 'コピーできませんでした';
   } else if (kind === 'link') {
     const url = await shareUrl(live, includeMemo);
-    $status.textContent = (await copyText(url)) ? 'リンクをコピーしました。開くと誰でもこのセトリを見られます。' : 'コピーできませんでした';
+    $status.textContent = (await copyText(url)) ? 'リンクをコピーしました。開くと誰でもこの内容を見られます。' : 'コピーできませんでした';
   } else if (kind === 'x') {
     const url = await shareUrl(live, includeMemo);
     const params = new URLSearchParams({ text: postText(live) });

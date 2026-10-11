@@ -233,7 +233,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 .item.encore .row { justify-content: center; }
 .setlist .empty { list-style: none; }
 #add-form input[hidden] + button { flex: 1; }
-.toolbar .grow-btn { flex: 1; padding: 14px 16px; }
+.toolbar .grow-btn { flex: 1 1 100%; padding: 14px 16px; }
 
 /* バックアップ */
 .backup {
@@ -485,3 +485,26 @@ button.small { padding: 6px 10px; font-size: 0.8rem; font-weight: 400; }
 #picker-dialog { height: 92vh; max-height: 92vh; }
 .picker-body { gap: 6px; }
 .credit { font-size: 0.7rem; }
+
+/* プレイリスト */
+.badge {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--accent-2);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.7;
+}
+.item-artist {
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding-left: calc(2.6em + 16px);
+  margin-top: -2px;
+}
+.howto { margin-top: 8px; font-size: 0.85rem; color: var(--muted); }
+.howto summary { cursor: pointer; color: var(--text); }
+.howto p { margin: 8px 0; }
+.howto b { color: var(--text); }
+#pl-songs { min-height: 9em; }
