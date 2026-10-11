@@ -508,3 +508,8 @@ button.small { padding: 6px 10px; font-size: 0.8rem; font-weight: 400; }
 .howto p { margin: 8px 0; }
 .howto b { color: var(--text); }
 #pl-songs { min-height: 9em; }
+
+/* Spotify */
+.button.spotify-btn, button.spotify-btn { background: #1db954; color: #0b0b0b; }
+.sp-list { padding-bottom: 24px; }
+span.album-art { display: block; }

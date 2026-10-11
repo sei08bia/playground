@@ -104,6 +104,7 @@ function route() {
   window.scrollTo(0, 0);
   if (page === 'new') return renderInfoForm(null);
   if (page === 'playlist' && id === 'new') return renderPlaylistForm(null);
+  if (page === 'spotify') return renderSpotify();
   if (page === 'live' && getLive(id)) {
     if (sub === 'info') return isPlaylist(getLive(id)) ? renderPlaylistForm(getLive(id)) : renderInfoForm(getLive(id));
     return renderEditor(getLive(id));
@@ -307,6 +308,11 @@ function parseSongList(text) {
 function renderPlaylistForm(live) {
   $app.innerHTML = `
     <h1>${live ? 'プレイリストを編集' : 'プレイリストを取り込む'}</h1>
+    ${live ? '' : `
+    <div class="card stack">
+      <a href="#/spotify" class="button spotify-btn">Spotifyのプレイリストから選ぶ</a>
+      <p class="hint">Apple Music などほかのサービスの場合は、下に曲名リストを貼り付けてください。</p>
+    </div>`}
     <form class="card" id="pl-form">
       <label for="pl-title">プレイリスト名</label>
       <input id="pl-title" name="title" value="${esc(live?.title || '')}" required autocomplete="off">
@@ -349,6 +355,221 @@ function renderPlaylistForm(live) {
     saveLives();
     if (songs.length) toast(`${songs.length}曲を取り込みました`);
     location.hash = '#/live/' + target.id;
+  });
+}
+
+/* ===== Spotify のプレイリスト取り込み（PKCE方式。サーバー不要） ===== */
+
+// Spotify の開発者ダッシュボードで作ったアプリの Client ID（公開して問題ない値）
+const SPOTIFY_CLIENT_ID = '';
+const SPOTIFY_TOKEN_KEY = 'setlist-note:spotify-token';
+const SPOTIFY_PKCE_KEY = 'setlist-note:spotify-pkce';
+const spotifyRedirect = () => location.origin + location.pathname;
+
+function readJson(key) {
+  try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
+}
+function writeJson(key, value) {
+  try {
+    if (value == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+  } catch { /* 保存できなくても続行 */ }
+}
+
+const randomCode = (n) => toBase64Url(crypto.getRandomValues(new Uint8Array(n)));
+
+async function spotifyLogin() {
+  const verifier = randomCode(48);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const state = randomCode(12);
+  writeJson(SPOTIFY_PKCE_KEY, { verifier, state });
+  const q = new URLSearchParams({
+    client_id: SPOTIFY_CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: spotifyRedirect(),
+    code_challenge_method: 'S256',
+    code_challenge: toBase64Url(new Uint8Array(digest)),
+    state,
+    scope: 'playlist-read-private playlist-read-collaborative',
+  });
+  location.href = 'https://accounts.spotify.com/authorize?' + q;
+}
+
+function saveSpotifyToken(t, prev) {
+  const token = {
+    access: t.access_token,
+    refresh: t.refresh_token || prev?.refresh,
+    exp: Date.now() + ((t.expires_in || 3600) - 60) * 1000,
+  };
+  writeJson(SPOTIFY_TOKEN_KEY, token);
+  return token;
+}
+
+async function spotifyTokenRequest(params) {
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: SPOTIFY_CLIENT_ID, ...params }),
+  });
+  if (!res.ok) throw new Error('token ' + res.status);
+  return res.json();
+}
+
+// サインインから戻ってきた時（?code=... 付きで開かれる）にトークンを受け取る
+async function handleSpotifyCallback() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has('code') && !params.has('error')) return;
+  const saved = readJson(SPOTIFY_PKCE_KEY);
+  writeJson(SPOTIFY_PKCE_KEY, null);
+  history.replaceState(null, '', location.pathname + '#/spotify');
+  if (params.has('error') || !saved || params.get('state') !== saved.state) {
+    toast('Spotifyへのサインインを中止しました');
+    return;
+  }
+  try {
+    saveSpotifyToken(await spotifyTokenRequest({
+      grant_type: 'authorization_code',
+      code: params.get('code'),
+      redirect_uri: spotifyRedirect(),
+      code_verifier: saved.verifier,
+    }));
+  } catch {
+    toast('Spotifyへのサインインに失敗しました');
+  }
+}
+
+async function spotifyAccessToken() {
+  const token = readJson(SPOTIFY_TOKEN_KEY);
+  if (!token) return null;
+  if (Date.now() < token.exp) return token.access;
+  if (!token.refresh) { writeJson(SPOTIFY_TOKEN_KEY, null); return null; }
+  try {
+    return saveSpotifyToken(await spotifyTokenRequest({ grant_type: 'refresh_token', refresh_token: token.refresh }), token).access;
+  } catch {
+    writeJson(SPOTIFY_TOKEN_KEY, null);
+    return null;
+  }
+}
+
+async function spotifyGet(path) {
+  const access = await spotifyAccessToken();
+  if (!access) throw Object.assign(new Error('auth'), { status: 401 });
+  const res = await fetch(path.startsWith('https:') ? path : 'https://api.spotify.com/v1' + path, {
+    headers: { Authorization: 'Bearer ' + access },
+  });
+  if (res.status === 401) writeJson(SPOTIFY_TOKEN_KEY, null);
+  if (!res.ok) throw Object.assign(new Error('http'), { status: res.status });
+  return res.json();
+}
+
+async function spotifyPlaylists() {
+  const out = [];
+  let next = '/me/playlists?limit=50';
+  while (next && out.length < 300) {
+    const page = await spotifyGet(next);
+    out.push(...(page.items || []).filter(Boolean));
+    next = page.next;
+  }
+  return out;
+}
+
+async function spotifyPlaylistSongs(id) {
+  const songs = [];
+  let next = `/playlists/${id}/tracks?limit=100`;
+  let triedItems = false;
+  while (next) {
+    let page;
+    try {
+      page = await spotifyGet(next);
+    } catch (e) {
+      // 新しいAPIでは /items に変わっている場合があるので一度だけ切り替える
+      if (!triedItems && !songs.length && (e.status === 403 || e.status === 404)) {
+        triedItems = true;
+        next = `/playlists/${id}/items?limit=100`;
+        continue;
+      }
+      throw e;
+    }
+    for (const row of page.items || []) {
+      const t = row?.track || row?.item;
+      if (!t?.name) continue;
+      songs.push({ title: t.name, artist: (t.artists || []).map((a) => a.name).join(', ') });
+    }
+    next = page.next;
+  }
+  return songs;
+}
+
+async function renderSpotify() {
+  const back = '<a href="#/playlist/new" class="button secondary">戻る</a>';
+  if (!SPOTIFY_CLIENT_ID) {
+    $app.innerHTML = `
+      <h1>Spotifyから取り込む</h1>
+      <div class="card"><p>Spotify との接続設定がまだ終わっていません。設定が済むと、ここからサインインしてプレイリストを選べるようになります。</p>${back}</div>`;
+    return;
+  }
+  if (!(await spotifyAccessToken())) {
+    $app.innerHTML = `
+      <h1>Spotifyから取り込む</h1>
+      <div class="card stack">
+        <p>Spotify にサインインすると、自分のプレイリストを一覧から選んで取り込めます。プレイリストの中身を読むだけで、変更はしません。</p>
+        <button class="spotify-btn" data-sp="login">Spotifyでサインイン</button>
+        ${back}
+      </div>`;
+    bindSpotify();
+    return;
+  }
+  $app.innerHTML = `
+    <div class="row"><h1 class="grow">Spotifyのプレイリスト</h1><button class="secondary small" data-sp="logout">サインアウト</button></div>
+    <p class="hint" id="sp-status">読み込み中…</p>
+    <ul class="picker-list works sp-list" id="sp-list"></ul>`;
+  bindSpotify();
+  try {
+    const lists = await spotifyPlaylists();
+    if (!location.hash.startsWith('#/spotify')) return;
+    document.getElementById('sp-status').textContent = lists.length ? '取り込むプレイリストをタップしてください。' : 'プレイリストがありません。';
+    document.getElementById('sp-list').innerHTML = lists.map((p) => `
+      <li><button type="button" class="work" data-sp-playlist="${esc(p.id)}" data-name="${esc(p.name)}">
+        ${p.images?.[0]?.url ? `<img class="album-art" src="${esc(p.images[0].url)}" alt="" loading="lazy">` : '<span class="album-art"></span>'}
+        <span class="work-name">${esc(p.name)}</span>
+        <span class="hint">${(p.tracks?.total ?? p.items?.total ?? '')}${(p.tracks?.total ?? p.items?.total) != null ? '曲' : ''}</span>
+      </button></li>`).join('');
+  } catch (e) {
+    document.getElementById('sp-status').textContent = e.status === 403
+      ? 'このSpotifyアカウントはまだこのアプリを使えません。アプリの持ち主がSpotifyの管理画面で利用者として追加する必要があります。'
+      : e.status === 401 ? 'サインインの有効期限が切れました。もう一度サインインしてください。' : 'プレイリストを読み込めませんでした。電波の良い場所でもう一度試してください。';
+  }
+}
+
+function bindSpotify() {
+  $app.querySelectorAll('[data-sp="login"]').forEach((b) => b.addEventListener('click', spotifyLogin));
+  $app.querySelectorAll('[data-sp="logout"]').forEach((b) => b.addEventListener('click', () => {
+    writeJson(SPOTIFY_TOKEN_KEY, null);
+    renderSpotify();
+  }));
+  $app.querySelector('#sp-list')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-sp-playlist]');
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    const status = document.getElementById('sp-status');
+    status.textContent = `「${btn.dataset.name}」を取り込み中…`;
+    try {
+      const songs = await spotifyPlaylistSongs(btn.dataset.spPlaylist);
+      const live = {
+        id: newId(), kind: 'playlist', title: btn.dataset.name, artist: '', venue: '', date: today(), memo: '',
+        source: 'spotify', createdAt: Date.now(), updatedAt: Date.now(),
+        items: songs.map((s) => ({ id: newId(), type: 'song', title: s.title, memo: '', ...(s.artist ? { artist: s.artist } : {}) })),
+      };
+      lives.push(live);
+      saveLives();
+      toast(`${songs.length}曲を取り込みました`);
+      location.hash = '#/live/' + live.id;
+    } catch (err) {
+      btn.disabled = false;
+      status.textContent = err.status === 403
+        ? 'このプレイリストは読み込めませんでした（Spotifyが提供を制限しているプレイリストの可能性があります）。'
+        : '取り込めませんでした。もう一度試してください。';
+    }
   });
 }
 
@@ -1309,4 +1530,4 @@ $app.addEventListener('change', (e) => {
   if (e.target.dataset.action === 'import' && e.target.files[0]) importBackup(e.target.files[0]);
 });
 
-route();
+handleSpotifyCallback().finally(route);
