@@ -431,3 +431,57 @@ button.small { padding: 6px 10px; font-size: 0.8rem; font-weight: 400; }
 }
 
 [hidden] { display: none !important; }
+
+/* 曲を選ぶシート内の「いまのセトリ」 */
+.mini-setlist {
+  flex: none;
+  background: var(--bg);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+.mini-head { font-weight: 700; font-size: 0.9rem; gap: 6px; }
+.mini-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 22vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.mini-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  font-size: 0.9rem;
+  border-radius: 6px;
+}
+.mini-item .num {
+  color: var(--accent);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.4em;
+}
+.mini-item.mc .num { color: var(--mc); }
+.mini-item.mc .grow { color: var(--muted); }
+.mini-item.encore { color: var(--encore); font-weight: 700; font-size: 0.8rem; justify-content: center; }
+.mini-item .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-remove {
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.8rem;
+}
+.mini-empty { font-size: 0.8rem; padding: 4px; }
+.mini-item.flash { animation: mini-flash 1.2s ease-out; }
+@keyframes mini-flash {
+  from { background: var(--accent); color: #fff; }
+  to { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mini-item.flash { animation: none; background: var(--surface-2); }
+}
+#picker-dialog { height: 92vh; max-height: 92vh; }
+.picker-body { gap: 6px; }
+.credit { font-size: 0.7rem; }

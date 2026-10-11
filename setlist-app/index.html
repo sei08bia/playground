@@ -40,6 +40,14 @@
   <dialog id="picker-dialog">
     <div class="picker-body">
       <div class="row picker-head" id="picker-head"></div>
+      <section class="mini-setlist" aria-label="いまのセトリ">
+        <div class="row mini-head">
+          <span class="grow">いまのセトリ <span class="hint" id="mini-count"></span></span>
+          <button type="button" class="secondary small" data-action="mini-mc">＋MC</button>
+          <button type="button" class="secondary small" data-action="mini-encore">＋アンコール</button>
+        </div>
+        <ol class="mini-list" id="mini-list"></ol>
+      </section>
       <input id="picker-search" type="search" autocomplete="off" placeholder="曲名で探す">
       <div class="filters" id="picker-filters" role="group" aria-label="作品の種類" hidden>
         <button type="button" data-filter="all">すべて</button>

@@ -379,7 +379,8 @@ function jsonp(url) {
   return new Promise((resolve, reject) => {
     const cb = '__jsonp' + Math.random().toString(36).slice(2);
     const script = document.createElement('script');
-    const cleanup = () => { clearTimeout(timer); delete window[cb]; script.remove(); };
+    // 遅れて届いた応答でエラーにならないよう、コールバックは空の関数にして残す
+    const cleanup = () => { clearTimeout(timer); window[cb] = () => {}; script.remove(); };
     const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, 8000);
     window[cb] = (data) => { cleanup(); resolve(data); };
     script.onerror = () => { cleanup(); reject(new Error('jsonp')); };
@@ -567,6 +568,9 @@ function openPicker() {
   openedAlbum = null;
   $pickerSearch.value = '';
   picker.showModal();
+  miniCount = 0; // 開いた時は最後の曲まで送る（光らせはしない）
+  renderMini();
+  document.querySelectorAll('.mini-item.flash').forEach((el) => el.classList.remove('flash'));
   ensureCatalog(current);
   renderPicker();
 }
@@ -663,6 +667,30 @@ function renderPicker() {
     : '<li class="hint">該当する作品がありません。上の欄に曲名を入れて探せます。</li>';
 }
 
+// 曲を選ぶシートの上部に出す、いまのセトリ（追加するとその場で反映）
+let miniCount = 0;
+function renderMini() {
+  if (!picker.open || !current) return;
+  const items = current.items;
+  const nums = numberItems(items);
+  const added = items.length > miniCount;
+  miniCount = items.length;
+  document.getElementById('mini-count').textContent = `${countSongs(current)}曲`;
+  const ol = document.getElementById('mini-list');
+  ol.innerHTML = items.length === 0
+    ? '<li class="hint mini-empty">まだ空です。下から曲をタップすると、ここに追加されます。</li>'
+    : items.map((it, i) => {
+      const flash = added && i === items.length - 1 ? ' flash' : '';
+      if (it.type === 'encore') return `<li class="mini-item encore${flash}" data-id="${it.id}"><span class="grow">― ENCORE ―</span><button type="button" class="mini-remove" data-action="mini-remove" aria-label="削除">✕</button></li>`;
+      const label = it.type === 'mc' ? (it.title || '') : it.title;
+      return `<li class="mini-item ${it.type}${flash}" data-id="${it.id}">
+        <span class="num">${nums[i]}</span><span class="grow">${esc(label)}</span>
+        <button type="button" class="mini-remove" data-action="mini-remove" aria-label="削除">✕</button>
+      </li>`;
+    }).join('');
+  if (added) ol.scrollTop = ol.scrollHeight;
+}
+
 async function openAlbum(albumId) {
   const album = catalog.albums.find((a) => String(a.id) === String(albumId));
   if (!album) return;
@@ -713,6 +741,16 @@ picker.addEventListener('click', (e) => {
     renderPicker();
     return;
   }
+  const miniRemove = e.target.closest('[data-action="mini-remove"]');
+  if (miniRemove) {
+    removeItem(current, miniRemove.closest('.mini-item').dataset.id);
+    miniCount = current.items.length;
+    renderMini();
+    renderPicker();
+    return;
+  }
+  if (e.target.closest('[data-action="mini-mc"]')) return addItem(current, 'mc', '');
+  if (e.target.closest('[data-action="mini-encore"]')) return addItem(current, 'encore', '');
   const work = e.target.closest('[data-album]');
   if (work) return openAlbum(work.dataset.album);
   const filter = e.target.closest('[data-filter]');
@@ -771,6 +809,7 @@ function renderSetlist(live) {
         </li>`;
     }).join('');
   ol.querySelectorAll('textarea').forEach(autoGrow);
+  renderMini();
 }
 
 function moveItem(live, id, delta) {
@@ -786,7 +825,8 @@ function removeItem(live, id) {
   const it = live.items.find((x) => x.id === id);
   if (!it) return;
   const name = it.type === 'encore' ? 'アンコールの区切り' : it.title || (it.type === 'mc' ? 'このMC' : 'この曲');
-  if ((it.title || it.memo) && !confirm(`「${name}」を削除しますか？`)) return;
+  // メモを書いた項目だけ確認する（曲名だけならすぐ入れ直せる）
+  if (it.memo && !confirm(`「${name}」を削除しますか？`)) return;
   live.items = live.items.filter((x) => x.id !== id);
   saveSoon(live);
   renderSetlist(live);
