@@ -39,14 +39,16 @@
 
   <dialog id="picker-dialog">
     <div class="picker-body">
-      <div class="row">
-        <h2 class="grow" id="picker-artist">曲一覧</h2>
-        <button type="button" class="secondary small" data-action="change-artist">アーティストを変更</button>
+      <div class="row picker-head" id="picker-head"></div>
+      <input id="picker-search" type="search" autocomplete="off" placeholder="曲名で探す">
+      <div class="filters" id="picker-filters" role="group" aria-label="作品の種類" hidden>
+        <button type="button" data-filter="all">すべて</button>
+        <button type="button" data-filter="album">アルバム</button>
+        <button type="button" data-filter="single">シングル・EP</button>
       </div>
-      <input id="picker-search" type="search" autocomplete="off" placeholder="曲名で絞り込み">
       <p id="picker-status" class="hint" role="status"></p>
       <ul id="picker-list" class="picker-list"></ul>
-      <p class="hint credit">曲の一覧は Apple Music の公開データから取得しています。</p>
+      <p class="hint credit">曲・ジャケットは Apple Music、写真は Deezer の公開データから表示しています。</p>
       <form method="dialog"><button class="secondary close-btn">閉じる</button></form>
     </div>
   </dialog>

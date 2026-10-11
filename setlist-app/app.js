@@ -178,7 +178,8 @@ function renderInfoForm(live) {
     <h1>${live ? 'ライブ情報を編集' : 'ライブを記録する'}</h1>
     <form class="card" id="info-form">
       <label for="f-artist">アーティスト</label>
-      <input id="f-artist" name="artist" value="${esc(l.artist)}" required autocomplete="off">
+      <input id="f-artist" name="artist" value="${esc(l.artist)}" required autocomplete="off" placeholder="名前を入れると候補が出ます">
+      <div class="artist-cands" id="artist-cands" role="radiogroup" aria-label="アーティストの候補"></div>
       <label for="f-title">ライブ・ツアー名</label>
       <input id="f-title" name="title" value="${esc(l.title)}" autocomplete="off">
       <label for="f-date">日付</label>
@@ -193,6 +194,52 @@ function renderInfoForm(live) {
     ${live ? `<button class="danger" data-action="delete-live" data-id="${live.id}">このライブを削除</button>` : ''}`;
 
   const form = document.getElementById('info-form');
+  const box = document.getElementById('artist-cands');
+  // 候補から選んだアーティスト（写真・曲一覧の紐づけ先）
+  let chosen = live?.catalogArtist?.id ? { ...live.catalogArtist } : null;
+  let cands = chosen ? [chosen] : [];
+  let searchSeq = 0;
+
+  const renderCands = () => {
+    box.innerHTML = cands.map((a) => `
+      <button type="button" class="artist-cand" role="radio" aria-checked="${chosen?.id === a.id}" data-cand="${a.id}">
+        ${avatarHtml(a.photo, a.name)}
+        <span class="name">${esc(a.name)}</span>
+        ${a.genre ? `<span class="hint">${esc(a.genre)}</span>` : ''}
+      </button>`).join('');
+  };
+
+  const search = async (name) => {
+    const seq = ++searchSeq;
+    if (!name.trim()) { cands = []; chosen = null; renderCands(); return; }
+    let found;
+    try { found = await findArtists(name); } catch { return; }
+    if (seq !== searchSeq) return;
+    cands = found.slice(0, 6);
+    chosen = cands.find((a) => normTitle(a.name) === normTitle(name)) || cands[0] || null;
+    renderCands();
+    // 写真は候補ごとに後から差し込む
+    await Promise.all(cands.map(async (a) => {
+      a.photo = await artistPhoto(a.name);
+      if (seq === searchSeq) renderCands();
+    }));
+  };
+
+  renderCands();
+  if (chosen && chosen.photo === undefined) artistPhoto(chosen.name).then((p) => { chosen.photo = p; renderCands(); });
+
+  let timer = null;
+  form.artist.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => search(form.artist.value), 450);
+  });
+  box.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-cand]');
+    if (!b) return;
+    chosen = cands.find((a) => String(a.id) === b.dataset.cand);
+    renderCands();
+  });
+
   if (!live) form.artist.focus();
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -202,8 +249,12 @@ function renderInfoForm(live) {
       target = { id: newId(), items: [], memo: '', createdAt: Date.now() };
       lives.push(target);
     }
-    // アーティスト名を変えたら曲一覧の紐づけもやり直す
-    if (target.artist !== values.artist.trim()) delete target.catalogArtist;
+    if (chosen) {
+      target.catalogArtist = { id: chosen.id, name: chosen.name, photo: chosen.photo ?? undefined };
+    } else if (target.artist !== values.artist.trim()) {
+      // 候補を選ばずに名前を変えたら、曲一覧の紐づけは開いた時にやり直す
+      delete target.catalogArtist;
+    }
     Object.assign(target, {
       artist: values.artist.trim(),
       title: values.title.trim(),
@@ -220,11 +271,24 @@ function renderInfoForm(live) {
 
 let addType = 'song';
 
+function avatarHtml(photo, name) {
+  return photo
+    ? `<img class="avatar" src="${esc(photo)}" alt="" loading="lazy">`
+    : `<span class="avatar placeholder" aria-hidden="true">${esc((name || '♪').trim().charAt(0))}</span>`;
+}
+
+const livePhoto = (l) => l.catalogArtist?.photo || l.sharedPhoto || null;
+
 function headerHtml(l) {
   return `
-    <div class="meta">${esc(formatDate(l.date))}${l.venue ? ' ・ ' + esc(l.venue) : ''}</div>
-    <div class="artist">${esc(l.artist)}</div>
-    ${l.title ? `<h1>${esc(l.title)}</h1>` : ''}`;
+    <div class="header-row">
+      ${livePhoto(l) ? avatarHtml(livePhoto(l), l.artist).replace('class="avatar"', 'class="avatar large"') : ''}
+      <div class="grow">
+        <div class="meta">${esc(formatDate(l.date))}${l.venue ? ' ・ ' + esc(l.venue) : ''}</div>
+        <div class="artist">${esc(l.artist)}</div>
+        ${l.title ? `<h1>${esc(l.title)}</h1>` : ''}
+      </div>
+    </div>`;
 }
 
 function renderEditor(live) {
@@ -252,7 +316,7 @@ function renderEditor(live) {
           <button type="button" data-type="encore">★ アンコール</button>
         </div>
         <form class="row" id="add-form">
-          <button type="button" class="secondary list-btn" data-action="open-picker">曲一覧</button>
+          <button type="button" class="secondary list-btn" data-action="open-picker">曲を選ぶ</button>
           <input class="grow" id="add-input" autocomplete="off" enterkeyhint="done">
           <button type="submit">追加</button>
         </form>
@@ -288,26 +352,51 @@ function setAddType(type) {
   addType = type;
   document.querySelectorAll('.add-bar [data-type]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.type === type)));
   const input = document.getElementById('add-input');
-  input.placeholder = { song: '曲名を入力 or 一覧から選ぶ', mc: 'MCの話題（あとで書いてもOK）', encore: '' }[type];
+  input.placeholder = { song: '曲名を入力', mc: 'MCの話題（あとで書いてもOK）', encore: '' }[type];
   input.hidden = type === 'encore';
   document.querySelector('[data-action="open-picker"]').hidden = type !== 'song';
   input.closest('form').querySelector('[type=submit]').textContent = type === 'encore' ? 'アンコールの区切りを追加' : '追加';
   renderSuggest();
 }
 
-/* ===== アーティストの曲一覧（Apple Music の公開検索APIから取得） ===== */
+/* ===== アーティストの曲・作品（Apple Music の公開検索API）と写真（Deezer） ===== */
 
 const CATALOG_PREFIX = 'setlist-note:catalog:';
 const CATALOG_TTL = 7 * 24 * 60 * 60 * 1000;
 
-// 曲一覧の状態（表示中のライブのもの）
-const catalog = { liveId: null, status: 'idle', artist: null, songs: [] };
+// 表示中のライブのアーティスト情報
+const catalog = { liveId: null, status: 'idle', artist: null, songs: [], albums: [] };
 
 async function itunes(path, params) {
   const q = new URLSearchParams({ country: 'JP', lang: 'ja_jp', ...params });
   const res = await fetch(`https://itunes.apple.com/${path}?${q}`);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return (await res.json()).results || [];
+}
+
+// Deezer の API は CORS 非対応なので JSONP で呼ぶ
+function jsonp(url) {
+  return new Promise((resolve, reject) => {
+    const cb = '__jsonp' + Math.random().toString(36).slice(2);
+    const script = document.createElement('script');
+    const cleanup = () => { clearTimeout(timer); delete window[cb]; script.remove(); };
+    const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, 8000);
+    window[cb] = (data) => { cleanup(); resolve(data); };
+    script.onerror = () => { cleanup(); reject(new Error('jsonp')); };
+    script.src = `${url}${url.includes('?') ? '&' : '?'}output=jsonp&callback=${cb}`;
+    document.head.append(script);
+  });
+}
+
+// 一定期間は端末に保存したものを使う（ライブ会場の電波が悪くても動くように）
+async function cached(key, load) {
+  try {
+    const hit = JSON.parse(localStorage.getItem(CATALOG_PREFIX + key));
+    if (hit && Date.now() - hit.at < CATALOG_TTL) return hit.value;
+  } catch { /* キャッシュなし */ }
+  const value = await load();
+  try { localStorage.setItem(CATALOG_PREFIX + key, JSON.stringify({ at: Date.now(), value })); } catch { /* 容量不足なら毎回取得 */ }
+  return value;
 }
 
 // 表記ゆれを吸収した比較用の文字列（全角半角・大小文字・カタカナ/ひらがな・記号）
@@ -329,50 +418,110 @@ async function findArtists(name) {
   return results.map((a) => ({ id: a.artistId, name: a.artistName, genre: a.primaryGenreName || '' }));
 }
 
-async function fetchSongs(artist) {
-  const cacheKey = CATALOG_PREFIX + artist.id;
+// アーティスト写真。名前が一致する時だけ使う（別人の写真を出さないため）
+async function artistPhoto(name) {
   try {
-    const cached = JSON.parse(localStorage.getItem(cacheKey));
-    if (cached && Date.now() - cached.at < CATALOG_TTL) return cached.songs;
-  } catch { /* キャッシュなし */ }
-
-  // 検索（人気順に近い）と、アーティストIDでの一覧を合わせて取りこぼしを減らす
-  const [searched, looked] = await Promise.all([
-    itunes('search', { term: artist.name, entity: 'song', attribute: 'artistTerm', limit: 200 }).catch(() => []),
-    itunes('lookup', { id: artist.id, entity: 'song', limit: 200 }).catch(() => []),
-  ]);
-  const seen = new Set();
-  const songs = [];
-  for (const r of [...searched.filter((x) => x.artistId === artist.id), ...looked]) {
-    if (r.wrapperType !== 'track' || !r.trackName || isExtraTrack(r.trackName)) continue;
-    const title = cleanTitle(r.trackName);
-    const key = normTitle(title);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    songs.push({ title, year: (r.releaseDate || '').slice(0, 4) });
+    return await cached('photo:' + normTitle(name), async () => {
+      const res = await jsonp(`https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=5`);
+      const hit = (res.data || []).find((a) => normTitle(a.name) === normTitle(name));
+      const url = hit?.picture_medium;
+      // 写真未登録のアーティストは空のパスになる
+      return url && !url.includes('/artist//') ? url : null;
+    });
+  } catch {
+    return null;
   }
-  try { localStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), songs })); } catch { /* 容量不足なら毎回取得 */ }
-  return songs;
+}
+
+const KIND_LABEL = { album: 'アルバム', single: 'シングル', ep: 'EP' };
+
+// 曲一覧と作品（アルバム・シングル）一覧をまとめて取得
+function fetchArtistData(artist) {
+  return cached('artist:' + artist.id, async () => {
+    // 検索（人気順に近い）と、アーティストIDでの一覧を合わせて取りこぼしを減らす
+    const [searched, looked, collections] = await Promise.all([
+      itunes('search', { term: artist.name, entity: 'song', attribute: 'artistTerm', limit: 200 }).catch(() => []),
+      itunes('lookup', { id: artist.id, entity: 'song', limit: 200 }).catch(() => []),
+      itunes('lookup', { id: artist.id, entity: 'album', limit: 200 }).catch(() => []),
+    ]);
+    const tracks = [...searched.filter((x) => x.artistId === artist.id), ...looked].filter((r) => r.wrapperType === 'track');
+
+    const seen = new Set();
+    const songs = [];
+    for (const r of tracks) {
+      if (!r.trackName || isExtraTrack(r.trackName)) continue;
+      const title = cleanTitle(r.trackName);
+      const key = normTitle(title);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      songs.push({ title, year: (r.releaseDate || '').slice(0, 4) });
+    }
+
+    // 作品名は英語表記で返ることがあるので、曲側に付いている日本語の作品名を優先する
+    const jaName = new Map(tracks.map((r) => [r.collectionId, r.collectionName]));
+    const seenAlbums = new Set();
+    const albums = collections
+      .filter((r) => r.wrapperType === 'collection' && r.collectionName && !isExtraTrack(r.collectionName))
+      .sort((a, b) => (b.releaseDate || '').localeCompare(a.releaseDate || ''))
+      .map((r) => {
+        const full = jaName.get(r.collectionId) || r.collectionName;
+        const m = full.match(/^(.*?)\s+-\s+(Single|EP)$/i);
+        return {
+          id: r.collectionId,
+          name: m ? m[1] : full,
+          kind: m ? m[2].toLowerCase() : 'album',
+          year: (r.releaseDate || '').slice(0, 4),
+          art: (r.artworkUrl100 || '').replace('100x100bb', '300x300bb'),
+        };
+      })
+      .filter((a) => {
+        const key = a.kind + normTitle(a.name);
+        if (seenAlbums.has(key)) return false; // 通常盤/クリーン盤などの重複
+        seenAlbums.add(key);
+        return true;
+      });
+    return { songs, albums };
+  });
+}
+
+function fetchAlbumTracks(albumId) {
+  return cached('tracks:' + albumId, async () => {
+    const results = await itunes('lookup', { id: albumId, entity: 'song' });
+    return results
+      .filter((r) => r.wrapperType === 'track')
+      .sort((a, b) => (a.discNumber - b.discNumber) || (a.trackNumber - b.trackNumber))
+      .map((r) => ({ title: cleanTitle(r.trackName), n: r.trackNumber, extra: isExtraTrack(r.trackName) }))
+      .filter((t) => !t.extra);
+  });
 }
 
 async function ensureCatalog(live, force = false) {
   if (!force && catalog.liveId === live.id && catalog.status !== 'error') return;
-  Object.assign(catalog, { liveId: live.id, status: 'loading', artist: null, songs: [] });
+  Object.assign(catalog, { liveId: live.id, status: 'loading', artist: null, songs: [], albums: [] });
   renderPicker();
   try {
     let artist = live.catalogArtist;
-    if (artist === undefined) {
+    if (artist === undefined || (artist && !artist.id)) {
       // 名前が完全一致する候補を優先、なければ一番上の候補
       const found = live.artist ? await findArtists(live.artist) : [];
-      artist = found.find((a) => normTitle(a.name) === normTitle(live.artist)) || found[0] || null;
-      live.catalogArtist = artist && { id: artist.id, name: artist.name };
+      const hit = found.find((a) => normTitle(a.name) === normTitle(live.artist)) || found[0];
+      artist = hit ? { id: hit.id, name: hit.name } : null;
+      live.catalogArtist = artist;
       saveSoon(live);
     }
     if (catalog.liveId !== live.id) return;
     if (!artist) { catalog.status = 'none'; renderPicker(); return; }
-    const songs = await fetchSongs(artist);
+    const { songs, albums } = await fetchArtistData(artist);
     if (catalog.liveId !== live.id) return;
-    Object.assign(catalog, { status: songs.length ? 'ready' : 'none', artist, songs });
+    Object.assign(catalog, { status: songs.length || albums.length ? 'ready' : 'none', artist, songs, albums });
+    if (artist.photo === undefined) {
+      artist.photo = await artistPhoto(artist.name);
+      saveSoon(live);
+      if (current === live && location.hash.startsWith('#/live/' + live.id) && !location.hash.endsWith('/info')) {
+        const header = document.querySelector('.view-header .header-row');
+        if (header) header.outerHTML = headerHtml(live);
+      }
+    }
   } catch {
     if (catalog.liveId === live.id) catalog.status = 'error';
   }
@@ -403,102 +552,187 @@ function renderSuggest() {
   ul.innerHTML = hits.map((s) => `<li><button type="button" data-pick="${esc(s.title)}">${esc(s.title)}</button></li>`).join('');
 }
 
-/* ===== 曲一覧ダイアログ ===== */
+/* ===== 曲を選ぶシート（ジャケット一覧 → 収録曲） ===== */
 
 const picker = document.getElementById('picker-dialog');
 const $pickerSearch = document.getElementById('picker-search');
-let pickerMode = 'songs'; // 'songs' | 'artists'
+let pickerMode = 'works'; // 'works' | 'album' | 'artists'
+let workFilter = 'all';   // 'all' | 'album' | 'single'
+let openedAlbum = null;   // { album, tracks, status }
 let artistCandidates = [];
 
 function openPicker() {
   if (!current) return;
-  pickerMode = 'songs';
+  pickerMode = 'works';
+  openedAlbum = null;
   $pickerSearch.value = '';
   picker.showModal();
   ensureCatalog(current);
   renderPicker();
 }
 
+function usedTitles() {
+  return new Set(current.items.filter((i) => i.type === 'song').map((i) => normTitle(i.title)));
+}
+
+function songRows(list, used) {
+  return list.map((s) => {
+    const done = used.has(normTitle(s.title));
+    return `
+      <li><button type="button" class="pick-row ${done ? 'used' : ''}" data-pick="${esc(s.title)}">
+        ${s.n ? `<span class="track-no">${s.n}</span>` : ''}
+        <span class="grow">${esc(s.title)}</span>
+        <span class="hint">${done ? '✓ 追加済み' : esc(s.year || '')}</span>
+      </button></li>`;
+  }).join('');
+}
+
 function renderPicker() {
-  if (!picker.open) return;
+  if (!picker.open || !current) return;
   const live = current;
-  const head = document.getElementById('picker-artist');
-  const status = document.getElementById('picker-status');
-  const list = document.getElementById('picker-list');
-  if (!live) return;
+  const $head = document.getElementById('picker-head');
+  const $status = document.getElementById('picker-status');
+  const $list = document.getElementById('picker-list');
+  const $filters = document.getElementById('picker-filters');
+  const query = $pickerSearch.value.trim();
+  $filters.hidden = true;
+  $pickerSearch.hidden = false;
 
   if (pickerMode === 'artists') {
-    head.textContent = 'アーティストを選ぶ';
+    $head.innerHTML = `<button type="button" class="icon" data-action="picker-back" aria-label="戻る">←</button><h2 class="grow">アーティストを選ぶ</h2>`;
     $pickerSearch.placeholder = 'アーティスト名で検索';
-    status.textContent = artistCandidates.length ? '' : '見つかりませんでした。名前を変えて検索してみてください。';
-    list.innerHTML = artistCandidates.map((a) => `
+    $status.textContent = artistCandidates.length ? '' : '見つかりませんでした。名前を変えて検索してみてください。';
+    $list.className = 'picker-list';
+    $list.innerHTML = artistCandidates.map((a) => `
       <li><button type="button" class="pick-row" data-artist-id="${a.id}">
-        <span class="grow">${esc(a.name)}</span><span class="hint">${esc(a.genre)}</span>
+        ${avatarHtml(a.photo, a.name)}<span class="grow">${esc(a.name)}</span><span class="hint">${esc(a.genre)}</span>
       </button></li>`).join('');
     return;
   }
 
-  $pickerSearch.placeholder = '曲名で絞り込み';
-  head.textContent = catalog.artist ? `${catalog.artist.name} の曲` : live.artist || '曲一覧';
-  status.textContent = {
-    loading: '曲一覧を読み込み中…',
-    error: '曲一覧を読み込めませんでした。電波の良い場所でもう一度開いてください。',
-    none: `「${live.artist}」の曲が見つかりませんでした。「アーティストを変更」から選び直せます。`,
+  if (pickerMode === 'album' && openedAlbum) {
+    const { album, tracks, status } = openedAlbum;
+    $pickerSearch.hidden = true;
+    $head.innerHTML = `
+      <button type="button" class="icon" data-action="picker-back" aria-label="作品一覧に戻る">←</button>
+      <img class="album-art small" src="${esc(album.art)}" alt="">
+      <div class="grow album-head"><h2>${esc(album.name)}</h2><span class="hint">${KIND_LABEL[album.kind]} ・ ${esc(album.year)}</span></div>`;
+    $status.textContent = status === 'loading' ? '収録曲を読み込み中…' : status === 'error' ? '収録曲を読み込めませんでした。' : '';
+    $list.className = 'picker-list';
+    $list.innerHTML = songRows(tracks || [], usedTitles());
+    return;
+  }
+
+  // 作品一覧（検索中は曲名で絞り込み）
+  const artist = catalog.artist;
+  $head.innerHTML = `
+    ${artist ? avatarHtml(artist.photo, artist.name) : ''}
+    <h2 class="grow">${esc(artist ? artist.name : live.artist || '曲一覧')}</h2>
+    <button type="button" class="secondary small" data-action="change-artist">変更</button>`;
+  $pickerSearch.placeholder = '曲名で探す';
+  $status.textContent = {
+    loading: '作品を読み込み中…',
+    error: '読み込めませんでした。電波の良い場所でもう一度開いてください。',
+    none: `「${live.artist}」の作品が見つかりませんでした。「変更」からアーティストを選び直せます。`,
     ready: '',
     idle: '',
   }[catalog.status];
-  const used = new Set(live.items.filter((i) => i.type === 'song').map((i) => normTitle(i.title)));
-  const hits = catalog.status === 'ready' ? matchSongs($pickerSearch.value) : [];
-  const typed = $pickerSearch.value.trim();
-  list.innerHTML = hits.map((s) => `
-    <li><button type="button" class="pick-row ${used.has(normTitle(s.title)) ? 'used' : ''}" data-pick="${esc(s.title)}">
-      <span class="grow">${esc(s.title)}</span>
-      <span class="hint">${used.has(normTitle(s.title)) ? '追加済み' : esc(s.year)}</span>
-    </button></li>`).join('')
-    + (typed && !hits.some((s) => normTitle(s.title) === normTitle(typed))
-      ? `<li><button type="button" class="pick-row free" data-pick="${esc(typed)}">「${esc(typed)}」をそのまま追加</button></li>`
-      : '');
+  if (catalog.status !== 'ready') { $list.innerHTML = ''; return; }
+
+  if (query) {
+    const hits = matchSongs(query);
+    $list.className = 'picker-list';
+    $list.innerHTML = songRows(hits, usedTitles())
+      + (!hits.some((s) => normTitle(s.title) === normTitle(query))
+        ? `<li><button type="button" class="pick-row free" data-pick="${esc(query)}">「${esc(query)}」をそのまま追加</button></li>`
+        : '');
+    return;
+  }
+
+  $filters.hidden = false;
+  $filters.querySelectorAll('[data-filter]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.filter === workFilter)));
+  const albums = catalog.albums.filter((a) => workFilter === 'all' || (workFilter === 'single' ? a.kind !== 'album' : a.kind === 'album'));
+  $list.className = 'picker-list works';
+  $list.innerHTML = albums.length
+    ? albums.map((a) => `
+      <li><button type="button" class="work" data-album="${a.id}">
+        <img class="album-art" src="${esc(a.art)}" alt="" loading="lazy">
+        <span class="work-name">${esc(a.name)}</span>
+        <span class="hint">${KIND_LABEL[a.kind]} ・ ${esc(a.year)}</span>
+      </button></li>`).join('')
+    : '<li class="hint">該当する作品がありません。上の欄に曲名を入れて探せます。</li>';
+}
+
+async function openAlbum(albumId) {
+  const album = catalog.albums.find((a) => String(a.id) === String(albumId));
+  if (!album) return;
+  openedAlbum = { album, tracks: [], status: 'loading' };
+  pickerMode = 'album';
+  renderPicker();
+  document.getElementById('picker-list').scrollTop = 0;
+  try {
+    const tracks = await fetchAlbumTracks(album.id);
+    if (openedAlbum?.album === album) Object.assign(openedAlbum, { tracks, status: 'ready' });
+  } catch {
+    if (openedAlbum?.album === album) openedAlbum.status = 'error';
+  }
+  renderPicker();
 }
 
 async function searchArtistCandidates(name) {
   pickerMode = 'artists';
   artistCandidates = [];
-  document.getElementById('picker-list').innerHTML = '';
+  renderPicker();
   document.getElementById('picker-status').textContent = '検索中…';
   try {
-    artistCandidates = name.trim() ? await findArtists(name) : [];
+    artistCandidates = name.trim() ? (await findArtists(name)).slice(0, 8) : [];
   } catch {
     document.getElementById('picker-status').textContent = '検索できませんでした。電波の良い場所でもう一度試してください。';
     return;
   }
   renderPicker();
+  const list = artistCandidates;
+  await Promise.all(list.map(async (a) => { a.photo = await artistPhoto(a.name); }));
+  if (list === artistCandidates) renderPicker();
 }
 
 let pickerSearchTimer = null;
 $pickerSearch.addEventListener('input', () => {
-  if (pickerMode === 'songs') return renderPicker();
+  if (pickerMode !== 'artists') return renderPicker();
   clearTimeout(pickerSearchTimer);
   pickerSearchTimer = setTimeout(() => searchArtistCandidates($pickerSearch.value), 400);
 });
 
 picker.addEventListener('click', (e) => {
   if (e.target === picker) return picker.close();
+  if (!current) return;
   const pick = e.target.closest('[data-pick]');
-  if (pick && current) {
+  if (pick) {
     addItem(current, 'song', pick.dataset.pick);
     toast(`「${pick.dataset.pick}」を追加しました`);
     renderPicker();
     return;
   }
+  const work = e.target.closest('[data-album]');
+  if (work) return openAlbum(work.dataset.album);
+  const filter = e.target.closest('[data-filter]');
+  if (filter) { workFilter = filter.dataset.filter; return renderPicker(); }
   const artistBtn = e.target.closest('[data-artist-id]');
-  if (artistBtn && current) {
+  if (artistBtn) {
     const a = artistCandidates.find((x) => String(x.id) === artistBtn.dataset.artistId);
-    current.catalogArtist = { id: a.id, name: a.name };
+    current.catalogArtist = { id: a.id, name: a.name, photo: a.photo ?? undefined };
     saveSoon(current);
-    pickerMode = 'songs';
+    pickerMode = 'works';
     $pickerSearch.value = '';
+    renderEditor(current);
     ensureCatalog(current, true);
     return;
+  }
+  if (e.target.closest('[data-action="picker-back"]')) {
+    pickerMode = 'works';
+    openedAlbum = null;
+    $pickerSearch.value = '';
+    return renderPicker();
   }
   if (e.target.closest('[data-action="change-artist"]')) {
     $pickerSearch.value = current.artist;
@@ -506,13 +740,15 @@ picker.addEventListener('click', (e) => {
   }
 });
 
+/* ===== セトリの表示と並べ替え ===== */
+
 function renderSetlist(live) {
   const nums = numberItems(live.items);
   const last = live.items.length - 1;
   document.getElementById('song-count').textContent = `${countSongs(live)}曲`;
   const ol = document.getElementById('setlist');
   ol.innerHTML = live.items.length === 0
-    ? `<li class="empty">下の入力欄から1曲目を追加しましょう。<br><span class="hint">曲名を打つと候補が出ます。「曲一覧」からも選べます。</span></li>`
+    ? `<li class="empty">下の入力欄から1曲目を追加しましょう。<br><span class="hint">曲名を打つと候補が出ます。「曲を選ぶ」からジャケットで選ぶこともできます。</span></li>`
     : live.items.map((it, i) => {
       const controls = `
         <div class="controls">
@@ -616,7 +852,7 @@ async function pipeBytes(bytes, stream) {
 
 async function encodeLive(live, includeMemo) {
   const compact = {
-    a: live.artist, t: live.title, d: live.date, v: live.venue,
+    a: live.artist, t: live.title, d: live.date, v: live.venue, p: livePhoto(live) || undefined,
     m: includeMemo ? live.memo : '',
     i: live.items.map((it) => {
       const row = [TYPE_CODES[it.type], it.title || ''];
@@ -638,6 +874,7 @@ async function decodeLive(encoded) {
   const c = JSON.parse(new TextDecoder().decode(bytes));
   return {
     artist: c.a || '', title: c.t || '', date: c.d || '', venue: c.v || '', memo: c.m || '',
+    sharedPhoto: /^https:\/\/[\w.-]+\.dzcdn\.net\//.test(c.p || '') ? c.p : undefined,
     items: (c.i || []).map(([t, title, memo]) => ({ id: newId(), type: CODE_TYPES[t] || 'song', title: title || '', memo: memo || '' })),
   };
 }
