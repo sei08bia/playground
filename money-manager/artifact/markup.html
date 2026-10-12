@@ -25,21 +25,18 @@
       <div class="card hero clickable" id="hero-worth" role="button" tabindex="0" aria-haspopup="dialog" aria-label="総資産の内訳を見る"></div>
     </div>
     <div class="card" id="pace-card"></div>
-    <div class="card" id="todo-card"></div>
     <div id="alerts"></div>
+    <div class="card" id="todo-card"></div>
     <div class="grid two">
-      <div class="card"><h2><span data-icon="list"></span>カテゴリ別（今期・変動費）</h2><div id="cat-chart"></div></div>
-      <div class="card"><h2><span data-icon="card"></span>カードの利用状況</h2><div id="cards-list"></div></div>
+      <div class="card"><h2><span data-icon="list"></span>何に使った？（今期）</h2><div id="cat-chart"></div></div>
+      <div class="card"><h2><span data-icon="calendar"></span>これからの引き落とし</h2><div id="upcoming"></div></div>
     </div>
     <div class="grid two">
-      <div class="card"><h2><span data-icon="bank"></span>総資産の内訳</h2><div id="asset-breakdown"></div></div>
-      <div class="card"><h2><span data-icon="calendar"></span>1か月以内の引き落とし</h2><div id="upcoming"></div></div>
+      <div class="card"><h2><span data-icon="card"></span>カード</h2><div id="cards-list"></div></div>
+      <div class="card"><h2><span data-icon="repeat"></span>固定費・サブスク（月）</h2><div id="recurring-summary"></div></div>
     </div>
-    <div class="card"><h2><span data-icon="trend"></span>純資産の推移</h2><div id="worth-chart" class="chart"></div></div>
-    <div class="grid two">
-      <div class="card"><h2><span data-icon="repeat"></span>固定費・サブスク（月換算）</h2><div id="recurring-summary"></div></div>
-      <div class="card"><h2><span data-icon="gift"></span>ほしいもの</h2><div id="wish-summary"></div></div>
-    </div>
+    <div class="card" id="worth-card"><h2><span data-icon="trend"></span>純資産の推移</h2><div id="worth-chart" class="chart"></div></div>
+    <div class="card" id="wish-card"><h2><span data-icon="gift"></span>ほしいもの</h2><div id="wish-summary"></div></div>
     <div class="card ai-card">
       <div class="row-between"><h2><span data-icon="sparkle"></span>AIのひとこと</h2><button class="primary" id="quick-advice">診断する</button></div>
       <div id="quick-advice-out" class="md muted">「診断する」を押すと、今の家計についてアドバイスします。</div>

@@ -1009,14 +1009,18 @@ function renderTodos() {
     <div><b>${esc(i.title)}</b> <span class="small muted">${esc(i.freq)}</span></div>
     <div class="small ${i.due ? "" : "muted"}">${esc(i.status)}${i.goto ? ` <a href="#" data-goto="${i.goto}">開く</a>` : ""}</div>
     <details><summary class="small">やり方</summary><p class="small">${esc(i.how)}</p></details></div></li>`;
-  $("#todo-card").innerHTML = `<div class="row-between wrap"><h2>${ico("check")}わたしのやること</h2><span class="small ${due.length || open.length ? "neg" : "muted"}">${due.length + open.length ? `今やること ${due.length + open.length} 件` : "今やることはありません"}</span></div>
-    <ul class="todo-list">${[...due, ...items.filter((i) => !i.due)].map(row).join("")}</ul>
-    <h3 class="small">確認待ち・メモ</h3>
-    <ul class="todo-list">${todos.map((t) => `<li class="todo ${t.done ? "done" : "due"}"><label><input type="checkbox" data-todo="${esc(t.id)}" ${t.done ? "checked" : ""}> ${esc(t.text)}</label></li>`).join("") || `<li class="small muted">ありません</li>`}</ul>
-    <form id="todo-add" class="row-between"><input name="text" placeholder="やることを追加（例: 楽天銀行の残高を確認）" aria-label="やることを追加"><button type="submit">追加</button></form>
-    ${todos.some((t) => t.done) ? `<button type="button" class="small" id="todo-clear">完了したものを消す</button>` : ""}
-    <details><summary class="small">そのときだけやること</summary><ul class="small">${TODO_SOMETIMES.map(([a, b]) => `<li><b>${esc(a)}</b>: ${esc(b)}</li>`).join("")}</ul></details>
-    <p class="small muted">自動でやっていること: カード利用通知メールの取り込み・カテゴリ分け（直した店名は覚えます）・予算と「あといくら使えるか」の計算・PayPay で受け取った精算の差し引き。</p>`;
+  const nDue = due.length + open.length;
+  $("#todo-card").innerHTML = `<div class="row-between wrap"><h2>${ico("check")}わたしのやること</h2><span class="todo-count ${nDue ? "due" : ""}">${nDue ? `${nDue} 件` : "✓ なし"}</span></div>
+    ${due.length ? `<ul class="todo-list">${due.map(row).join("")}</ul>` : ""}
+    ${open.length ? `<ul class="todo-list">${open.map((t) => `<li class="todo due"><label><input type="checkbox" data-todo="${esc(t.id)}"> ${esc(t.text)}</label></li>`).join("")}</ul>` : ""}
+    ${!nDue ? `<p class="small muted">今やることはありません。</p>` : ""}
+    <details class="todo-more"><summary class="small">すべてのやること・メモを追加</summary>
+      <ul class="todo-list">${items.filter((i) => !i.due).map(row).join("")}</ul>
+      ${todos.filter((t) => t.done).length ? `<ul class="todo-list">${todos.filter((t) => t.done).map((t) => `<li class="todo done"><label><input type="checkbox" data-todo="${esc(t.id)}" checked> ${esc(t.text)}</label></li>`).join("")}</ul><button type="button" class="small" id="todo-clear">完了したものを消す</button>` : ""}
+      <form id="todo-add" class="row-between"><input name="text" id="todo-add-text" placeholder="メモを追加（例: 楽天銀行の残高を確認）" aria-label="メモを追加"><button type="submit">追加</button></form>
+      <p class="small"><b>そのときだけ</b></p><ul class="small">${TODO_SOMETIMES.map(([a, b]) => `<li><b>${esc(a)}</b>: ${esc(b)}</li>`).join("")}</ul>
+      <p class="small muted">自動: カード利用メールの取り込み・カテゴリ分け・予算の計算・PayPay で受け取った精算の差し引き</p>
+    </details>`;
 }
 document.addEventListener("change", (e) => {
   const id = e.target.dataset?.todo;
@@ -1155,29 +1159,26 @@ function renderDashboard() {
   $("#hero-month").innerHTML = `<div class="hero-top"><div><div class="label">今月あと使えるお金 <span class="status ${b.status}">${STATUS_TEXT[b.status]}</span></div>
     <div class="value ${b.remaining < 0 ? "neg" : ""}">${yen(b.remaining)}</div></div>${ring(b.variable_budget > 0 ? b.remaining / b.variable_budget : 0, b.status)}</div>
     <div class="calc">予算 ${yen(b.variable_budget)} − 使った ${yen(b.spent)}</div>
-    <div class="sub">${md(b.period.start)}〜${md(b.period.end)}（給料日〜締め）・残り${b.period.days_left}日</div>`;
+    <div class="sub">${md(b.period.end)}の締めまで あと${b.period.days_left}日</div>`;
   $("#hero-today").innerHTML = `<div class="hero-top"><div><div class="label">今日あと使えるお金</div>
     <div class="value ${b.today_remaining < 0 ? "neg" : ""}">${yen(b.today_remaining)}</div></div><span class="badge">${ico("sun")}</span></div>
-    <div class="calc">今月あと ${yen(b.remaining + b.today_spent)} ÷ 残り${b.period.days_left}日（今日〜${md(b.period.end)}）${b.today_spent ? ` − 今日使った ${yen(b.today_spent)}` : ""}</div>
-    <div class="sub">毎日この額までなら、締めの日に予算ぴったりで終われます</div>`;
+    <div class="calc">${yen(b.remaining + b.today_spent)} ÷ ${b.period.days_left}日${b.today_spent ? ` − 今日 ${yen(b.today_spent)}` : ""}</div>
+    <div class="sub">毎日この額までなら予算内で終われます</div>`;
   $("#hero-worth").innerHTML = `<div class="hero-top"><div><div class="label">純資産（NISA・iDeCo 含む）</div>
     <div class="value">${yen(w.net_worth)}</div></div><span class="badge">${ico("bank")}</span></div>
-    <div class="sub">総資産 ${yen(w.total_assets)} − カード未払い ${yen(w.liability)} <span class="more">内訳 ›</span></div>
-    <div class="sub">すぐ使えるお金 ${yen(w.spendable)}（預金 − カード未払い）</div>`;
+    <div class="calc">総資産 ${yen(w.total_assets)} − カード未払い ${yen(w.liability)}</div>
+    <div class="sub"><span class="more">内訳を見る ›</span></div>`;
 
   const budget = Math.max(b.variable_budget, 1);
   const cls = b.status === "ok" ? "" : b.status === "warning" ? "warning" : "over";
   const inc = Math.max(b.income, 1), flowParts = [["固定費", b.fixed_monthly, "--series-1"], ["積立・先取り貯金", b.investment_monthly + b.savings_goal, "--series-3"], ["使った", Math.max(0, b.spent), "--series-2"]];
   const restV = Math.max(0, b.remaining);
-  const flowHtml = `<h2>${ico("pie")}今月のお金の行き先（手取り ${yen(b.income)}）</h2>
+  const flowHtml = `<h2>${ico("pie")}今月の手取り ${yen(b.income)} の行き先</h2>
     <div class="flow" role="img" aria-label="手取りの内訳">${flowParts.filter(([, v]) => v > 0).map(([l, v, c]) => `<div style="flex:${v};background:var(${c})" data-tip="${l}|${yen(v)}（${pct(v / inc)}）" data-sw="${c}"></div>`).join("")}${restV ? `<div class="rest" style="flex:${restV}" data-tip="あと使える|${yen(restV)}（${pct(restV / inc)}）"></div>` : ""}</div>
     <div class="flow-legend">${flowParts.map(([l, v, c]) => `<span><span class="sw" style="background:var(${c})"></span>${l}<b>${yen(v)}</b></span>`).join("")}<span><span class="sw" style="background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--border)"></span>あと使える<b>${yen(restV)}</b></span></div>`;
-  $("#pace-card").innerHTML = flowHtml + `<div class="row-between wrap" style="margin-top:16px"><h2>${ico("gauge")}今期の使ったペース</h2><span class="small muted">縦線＝今日時点の目安（${yen(b.expected_by_now)}）</span></div>
-    <div class="meter" role="img" aria-label="予算 ${yen(b.variable_budget)} のうち ${yen(b.spent)} 使用"><div class="fill ${cls}" style="width:${Math.min(100, (b.spent / budget) * 100)}%"></div><div class="mark" style="left:calc(${Math.min(100, (b.period.elapsed_days / b.period.total_days) * 100)}% - 1px)"></div></div>
-    <div class="meter-legend"><span>使った ${yen(b.spent)}（${pct(b.spent / budget)}）${b.reimbursed ? `<span class="muted">・立替の精算 ${yen(b.reimbursed)} を差し引き済み</span>` : ""}</span>
-      <span>このペースだと月末 ${yen(b.projected_spent)} → ${b.projected_surplus >= 0 ? `${yen(b.projected_surplus)} 余る見込み` : `<b class="neg">${yen(-b.projected_surplus)} 足りない見込み</b>`}</span>
-      <span>収入 ${yen(b.income)} − 固定費 ${yen(b.fixed_monthly)} − 積立 ${yen(b.investment_monthly)} − 先取り貯金 ${yen(b.savings_goal)}</span></div>
-    <div class="chart-sub">日ごとの使った累計</div>${renderCumChart(b)}`;
+  $("#pace-card").innerHTML = flowHtml + `<div class="row-between wrap pace-head"><h2>${ico("gauge")}使ったペース</h2>
+      <span class="pace-verdict ${b.status}">${b.projected_surplus >= 0 ? `このままだと締めで <b>${yen(b.projected_surplus)}</b> 余る` : `このままだと <b>${yen(-b.projected_surplus)}</b> 足りない`}</span></div>
+    ${renderCumChart(b)}${b.reimbursed ? `<p class="small muted">立替の精算 ${yen(b.reimbursed)} を差し引き済み</p>` : ""}`;
 
   const alerts = [];
   for (const p of d.payment_checks) if (p.shortfall > 0) alerts.push(["", `<b>${esc(p.account)}</b> の残高 ${yen(p.balance)} に対し、1か月以内に ${yen(p.due_amount)} の引き落とし予定。<b>${yen(p.shortfall)} 不足</b>しています。`]);
@@ -1193,32 +1194,33 @@ function renderDashboard() {
       <span class="name"><span class="emo" aria-hidden="true">${CAT_EMOJI[c.category] || "•"}</span>${esc(c.category)}</span>
       <div class="bar-track"><div class="fill ${c.budget && c.spent > c.budget ? "over" : ""}" style="width:${(c.spent / maxCat) * 100}%"></div>${c.budget ? `<div class="budget-line" style="left:calc(${(c.budget / maxCat) * 100}% - 1px)"></div>` : ""}</div>
       <span class="amt">${yen(c.spent)}${c.budget ? ` <span class="muted">/ ${man(c.budget)}</span>` : `<span class="pct">${pct(c.spent / Math.max(1, cats.reduce((s, x) => s + x.spent, 0)))}</span>`}</span></div>`).join("")}</div>
-    <p class="small muted">縦線＝カテゴリ予算。固定費として照合された明細は含みません。</p>`
+`
     : `<p class="muted">今期の支出はまだありません。<a href="#" data-goto="transactions">明細</a>でカードの CSV を取り込むか、支出を記録してください。</p>`;
 
   $("#cards-list").innerHTML = d.cards.length ? `<div class="list">${d.cards.map((c) => `
-    <div class="item"><div><div class="title">${esc(c.name)}</div>
-      <div class="meta">${c.closing_day === 31 ? "月末" : c.closing_day + "日"}締め・翌月${c.payment_day}日払い／今の利用期間 ${md(c.current_cycle.start)}〜${md(c.current_cycle.end)}: ${yen(c.current_cycle.amount)}</div></div>
+    <div class="item"><div><div class="title">${esc(c.institution || c.name)}</div>
+      <div class="meta">今の利用分 ${yen(c.current_cycle.amount)}（${md(c.current_cycle.end)}締め）</div></div>
       <div class="right"><div>${md(c.next_payment.date)} 引き落とし</div>
       <div class="title">${yen(c.next_payment.amount)}${c.next_payment.source === "email" ? '<span class="tag">メールで確定</span>' : c.next_payment.confirmed ? '<span class="tag">明細から推定</span>' : '<span class="tag">利用中</span>'}</div>
       ${c.next_payment.source === "email" && c.next_payment.amount - c.next_payment.tracked_amount > 1000 ? `<div class="meta">取り込んだ明細より ${yen(c.next_payment.amount - c.next_payment.tracked_amount)} 多い</div>` : ""}
       ${c.limit ? `<div class="meta">枠 ${pct(c.limit_usage)} 使用</div>` : ""}</div></div>`).join("")}</div>`
     : `<p class="muted">カードが未登録です。<a href="#" data-goto="assets">登録する</a></p>`;
 
-  lastAssets = renderAssets(d, w);
-  if ($("#asset-dialog").open) $("#asset-dialog-body").innerHTML = lastAssets;
-  $("#asset-breakdown").innerHTML = `${lastAssets}
+  lastAssets = `${renderAssets(d, w)}
     ${w.investments.length ? `<h3>運用成績</h3><div class="list">${w.investments.map((i) => `<div class="item"><div><div class="title">${esc(i.name)}</div><div class="meta">元本 ${yen(i.contributed)}</div></div><div class="right"><div>${yen(i.balance)}</div>${i.gain != null ? `<div class="meta ${i.gain < 0 ? "neg" : ""}">${i.gain >= 0 ? "+" : ""}${yen(i.gain)}（${i.gain_ratio != null ? (i.gain_ratio * 100).toFixed(1) : "-"}%）</div>` : ""}</div></div>`).join("")}</div>` : ""}
     <p class="small muted">生活防衛資金: すぐ使えるお金は生活費の <b>${d.emergency_fund.months_covered != null ? d.emergency_fund.months_covered.toFixed(1) : "-"}</b> か月分（目標 ${d.emergency_fund.target_months} か月 = ${yen(d.emergency_fund.target_amount)}）</p>`;
+  if ($("#asset-dialog").open) $("#asset-dialog-body").innerHTML = lastAssets;
 
   const byId = Object.fromEntries(d.accounts.map((a) => [a.id, a]));
   const upcoming = [...b.recurring.upcoming.filter((u) => byId[u.account_id]?.kind !== "card").map((u) => ({ ...u, label: REC_LABELS[u.kind] })),
-    ...d.cards.filter((c) => D.parse(c.next_payment.date) - D.today() <= 31).map((c) => ({ date: c.next_payment.date, name: `${c.name} 引き落とし`, amount: c.next_payment.amount, label: "カード" }))]
+    ...d.cards.filter((c) => D.parse(c.next_payment.date) - D.today() <= 31).map((c) => ({ date: c.next_payment.date, name: c.institution || c.name, amount: c.next_payment.amount, label: "カード" }))]
     .sort((a, b2) => a.date.localeCompare(b2.date));
-  $("#upcoming").innerHTML = upcoming.length ? `<div class="list">${upcoming.map((u) => `<div class="item"><div><span class="title">${esc(u.name)}</span><span class="tag">${u.label}</span>${u.variable ? '<span class="tag">変動</span>' : ""}<div class="meta">${md(u.date)}</div></div><div class="right">${u.variable ? "約" : ""}${yen(u.amount)}</div></div>`).join("")}</div><p class="small muted">カード払いの固定費はカードの引き落としに含まれます。</p>`
+  $("#upcoming").innerHTML = upcoming.length ? `<div class="list">${upcoming.map((u) => `<div class="item"><div><span class="title">${esc(u.name)}</span><span class="tag">${u.label}</span>${u.variable ? '<span class="tag">変動</span>' : ""}<div class="meta">${md(u.date)}</div></div><div class="right">${u.variable ? "約" : ""}${yen(u.amount)}</div></div>`).join("")}</div>`
     : `<p class="muted">1か月以内の引き落とし予定はありません。</p>`;
 
-  renderWorthChart($("#worth-chart"), d.history);
+  $("#worth-card").hidden = d.history.length < 2;
+  if (d.history.length >= 2) renderWorthChart($("#worth-chart"), d.history);
+  $("#wish-card").hidden = !d.wishlist.length;
 
   const rk = b.recurring.monthly_by_kind;
   $("#recurring-summary").innerHTML = `<div class="legend">${Object.entries(REC_LABELS).map(([k, l]) => `<div class="item"><span></span><span>${l}</span><span class="amt">${yen(rk[k] || 0)}</span></div>`).join("")}
