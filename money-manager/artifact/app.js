@@ -356,25 +356,35 @@ function dashboard() {
 
 // ================================================================== CSV（csv_import.py の移植）
 const CATEGORY_RULES = [
-  ["食費", ["スーパー", "イオン", "西友", "ライフ", "マルエツ", "業務スーパー", "成城石井", "まいばすけっと", "生協", "コープ"]],
+  ["食費", ["スーパー", "イオン", "西友", "マルエツ", "業務スーパー", "成城石井", "まいばすけっと", "マイバスケット", "生協", "コープ", "オオゼキ", "サミット", "ライフコーポ", "ライフ "]],
   ["コンビニ", ["セブン", "ローソン", "ファミリーマート", "ファミマ", "ミニストップ", "デイリーヤマザキ"]],
-  ["外食", ["マクドナルド", "スターバックス", "スタバ", "すき家", "吉野家", "松屋", "ガスト", "サイゼリヤ", "UBER EATS", "UBEREATS", "出前館", "レストラン", "カフェ", "居酒屋", "ドトール", "タリーズ"]],
+  ["外食", ["マクドナルド", "スターバックス", "スタバ", "すき家", "吉野家", "松屋", "ガスト", "サイゼリヤ", "UBER EATS", "UBEREATS", "出前館", "レストラン", "カフェ", "居酒屋", "ドトール", "タリーズ", "コメダ", "ラーメン", "ケンタッキー", "モスバーガー", "日高屋", "珈琲", "コーヒー"]],
   ["日用品", ["マツモトキヨシ", "ウエルシア", "ツルハ", "スギ薬局", "ダイソー", "無印", "ニトリ", "ドラッグ", "カインズ"]],
-  ["交通", ["JR", "モバイルSUICA", "SUICA", "PASMO", "メトロ", "タクシー", "鉄道", "バス", "ETC", "高速"]],
+  ["交通", ["JR", "モバイルSUICA", "SUICA", "PASMO", "パスモ", "スイカ", "メトロ", "タクシー", "鉄道", "バス", "HIGHWAYBUS", "ETC", "高速", "えきねっと"]],
   ["ネットショッピング", ["AMAZON", "アマゾン", "楽天市場", "ヤフーショッピング", "ZOZO", "メルカリ"]],
-  ["サブスク", ["NETFLIX", "SPOTIFY", "APPLE.COM", "ITUNES", "GOOGLE", "YOUTUBE", "AMAZON PRIME", "プライム", "DISNEY", "U-NEXT", "ADOBE", "CHATGPT", "OPENAI", "ANTHROPIC", "CLAUDE"]],
+  ["サブスク", ["NETFLIX", "SPOTIFY", "APPLE.COM", "APPLE COM", "ITUNES", "GOOGLE", "YOUTUBE", "AMAZON PRIME", "プライム", "DISNEY", "U-NEXT", "ADOBE", "CHATGPT", "OPENAI", "ANTHROPIC", "CLAUDE", "オンデマンド"]],
   ["通信", ["DOCOMO", "ドコモ", "ソフトバンク", "SOFTBANK", "楽天モバイル", "AHAMO", "POVO", "LINEMO", "UQ", "NURO"]],
   ["水道・光熱", ["電力", "でんき", "電気", "ガス", "水道", "ENEOS", "TEPCO", "東京電力", "関西電力"]],
   ["医療", ["病院", "クリニック", "医院", "歯科", "薬局"]],
-  ["趣味・娯楽", ["映画", "TOHO", "書店", "紀伊國屋", "STEAM", "NINTENDO", "任天堂", "PLAYSTATION", "ゲーム"]],
-  ["衣服・美容", ["ユニクロ", "UNIQLO", "ZARA", "H&M", "美容", "ヘア", "サロン"]],
+  ["趣味・娯楽", ["映画", "TOHO", "トウホウシネマ", "シネマ", "テアトル", "劇場", "ゲキジョウ", "チケット", "書店", "ショテン", "紀伊國屋", "STEAM", "NINTENDO", "任天堂", "PLAYSTATION", "ゲーム", "カラオケ", "美術館"]],
+  ["衣服・美容", ["ユニクロ", "UNIQLO", "ジーユー", "ZARA", "H&M", "洋服の青山", "美容", "ヘア", "サロン"]],
 ];
 const EXTRA_CATEGORIES = ["旅行", "住居", "保険", "教育", "交際費", "特別な支出", "その他"];
 const ALL_CATEGORIES = () => [...CATEGORY_RULES.map(([c]) => c), ...EXTRA_CATEGORIES];
 
+// カード明細の店名は半角カナで、小さい「ッ」「ァ」なども大きい字になっている（ﾌｱﾐﾘｰﾏｰﾄ）。
+// 照合はこのキーどうしで行う: 全角化・大文字・小書き文字を大きく・長音やハイフン・空白を除く
+const SMALL_KANA = { ァ: "ア", ィ: "イ", ゥ: "ウ", ェ: "エ", ォ: "オ", ッ: "ツ", ャ: "ヤ", ュ: "ユ", ョ: "ヨ", ヮ: "ワ", ヵ: "カ", ヶ: "ケ" };
+function kanaKey(s) {
+  return String(s || "").normalize("NFKC").toUpperCase()
+    .replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))
+    .replace(/[ァィゥェォッャュョヮヵヶ]/g, (c) => SMALL_KANA[c])
+    .replace(/[\sー－‐\-・.。、,]/g, "");
+}
+
 function guessCategory(desc) {
-  const t = String(desc || "").normalize("NFKC").toUpperCase();
-  for (const [cat, words] of CATEGORY_RULES) if (words.some((w) => t.includes(w.toUpperCase()))) return cat;
+  const t = kanaKey(desc);
+  for (const [cat, words] of CATEGORY_RULES) if (words.some((w) => t.includes(kanaKey(w)))) return cat;
   return "未分類";
 }
 
@@ -545,10 +555,10 @@ function matchCard(p) {
 }
 
 function matchRecurring(desc) {
-  const t = String(desc || "").normalize("NFKC").toUpperCase();
+  const t = kanaKey(desc);
   for (const r of recurring()) {
     if (r.active === false || !r.match_keyword) continue;
-    if (r.match_keyword.split(",").some((k) => k.trim() && t.includes(k.trim().normalize("NFKC").toUpperCase()))) return r.id;
+    if (r.match_keyword.split(",").some((k) => kanaKey(k) && t.includes(kanaKey(k)))) return r.id;
   }
   return null;
 }
@@ -685,7 +695,8 @@ async function readReceipts(mcp, sample, since, seen, summary, touchedMonths) {
       // カード下 4 桁が分かれば、登録したカードと一致したときだけそのカードの利用にする
       // （一致しなければ別のカードなので口座なし。下 4 桁が書いていなければ既定の支払い方法）
       const last4 = String(r.card_last4 || "").replace(/\D/g, "").slice(-4);
-      const accountId = last4.length === 4 ? (cards.find((c) => String(c.card_last4 || "") === last4)?.id || null) : last4 ? null : defaultAccount;
+      // card_last4 は「9746,3939」のように複数書ける（Apple Pay などは別の番号になるため）
+      const accountId = last4.length === 4 ? (cards.find((c) => String(c.card_last4 || "").split(",").map((x) => x.trim()).includes(last4))?.id || null) : last4 ? null : defaultAccount;
       const merchant = String(r.merchant || m.sender || "").slice(0, 40);
       const description = r.item ? `${merchant}（${String(r.item).slice(0, 24)}）` : merchant;
       await ensureMonths([D.ym(date)]);
@@ -1099,23 +1110,31 @@ txForm.addEventListener("submit", async (e) => {
 txForm.addEventListener("reset", () => setTimeout(() => { idField(txForm).value = ""; if (!txForm.date.value) txForm.date.value = D.fmt(D.today()); }));
 
 const csvForm = $("#csv-form");
-async function uploadCsv(dryRun) {
-  const file = csvForm.file.files[0];
-  if (!file) { toast("ファイルを選んでください"); return; }
-  const items = parseCsv(new Uint8Array(await file.arrayBuffer()));
-  if (!items.length) { $("#csv-result").innerHTML = `<p class="neg">明細を読み取れませんでした。日付・金額・内容の列がある CSV か確認してください。</p>`; return; }
-  const accountId = csvForm.account_id.value || null;
+// メール由来の明細（利用通知・購入メール）と CSV の同じ利用を探す。
+// 購入メールの日付は受信日なので CSV の利用日と数日ずれる。カード不明（口座なし）の購入メールも対象
+function findMailTwin(it, accountId) {
+  const cands = allTx().filter((t) => (t.source === "gmail" || t.source === "receipt") && t.amount === it.amount && t.type === it.type &&
+    ((t.account_id || null) === accountId || (t.source === "receipt" && !t.account_id)) &&
+    Math.abs(D.parse(t.date) - D.parse(it.date)) <= (t.source === "receipt" ? 5 : 3));
+  return cands.sort((a, b) => Math.abs(D.parse(a.date) - D.parse(it.date)) - Math.abs(D.parse(b.date) - D.parse(it.date)))[0] || null;
+}
+
+async function importCsv(buf, accountId, dryRun) {
+  const items = parseCsv(buf);
+  if (!items.length) return { items, inserted: 0, skipped: 0, merged: 0 };
   await ensureMonths(items.map((it) => D.ym(it.date)));
   const hashes = new Set(allTx().map((t) => t.h).filter(Boolean));
   const occ = {};
   let inserted = 0, skipped = 0, merged = 0;
   const touched = new Set();
+  const added = [];
   for (const it of items) {
     const key = `${it.date}|${it.amount}|${it.type}|${it.description}`;
     const h = `${accountId}|${key}|${(occ[key] = (occ[key] || 0) + 1) - 1}`;
     if (hashes.has(h)) { skipped++; continue; }
-    // Gmail の利用通知で先に入っていた同じ利用は、CSV の内容で置き換える
-    const dup = allTx().find((t) => (t.source === "gmail" || t.source === "receipt") && t.amount === it.amount && t.type === it.type && (t.account_id || null) === accountId && Math.abs(D.parse(t.date) - D.parse(it.date)) <= 3);
+    hashes.add(h);
+    // メールで先に入っていた同じ利用は、CSV の内容で置き換える（メールの方が分かりやすい内容とカテゴリは残す）
+    const dup = findMailTwin(it, accountId);
     if (dup) {
       merged++;
       if (!dryRun) {
@@ -1123,19 +1142,58 @@ async function uploadCsv(dryRun) {
         S.tx[ym].splice(i, 1);
         touched.add(ym);
         const { id: _old, ...rest } = dup;
-        touched.add(addTx({ ...rest, date: it.date, description: it.description, category: dup.category === "未分類" ? it.category : dup.category, source: "csv", h }));
+        touched.add(addTx({ ...rest, date: it.date, account_id: accountId, memo: [dup.memo, `明細: ${it.description}`].filter(Boolean).join(" / "),
+          category: dup.category === "未分類" ? it.category : dup.category, recurring_id: dup.recurring_id || matchRecurring(it.description) || matchRecurring(dup.description), source: "csv", h }));
       }
       continue;
     }
     inserted++;
-    if (!dryRun) touched.add(addTx({ ...it, account_id: accountId, recurring_id: it.type === "expense" ? matchRecurring(it.description) : null, source: "csv", h }));
-    hashes.add(h);
+    if (!dryRun) {
+      const recId = it.type === "expense" ? matchRecurring(it.description) : null;
+      const rec = recId && recurring().find((r) => r.id === recId);
+      // 固定費と照合できたら、その固定費のカテゴリを使う（楽天証券投信積立 → 投資 など）
+      const category = it.category === "未分類" && rec ? rec.category || REC_LABELS[rec.kind] : it.category;
+      const tx = { ...it, category, account_id: accountId, recurring_id: recId, source: "csv", h };
+      touched.add(addTx(tx));
+      added.push(tx);
+    }
   }
+  let aiCategorized = 0;
+  if (!dryRun) aiCategorized = await aiCategorize(allTx().filter((t) => t.source === "csv" && t.category === "未分類" && hashes.has(t.h)), touched);
   for (const ym of touched) save("tx/" + ym);
-  $("#csv-result").innerHTML = `<p>${items.length} 件を読み取り、${dryRun ? "取り込み対象" : "取り込み"} ${inserted} 件／重複スキップ ${skipped} 件${merged ? `／メールで取り込み済みの明細と統合 ${merged} 件` : ""}</p>
-    <div class="table-wrap"><table><tbody>${items.slice(0, 10).map((p) => `<tr><td>${p.date}</td><td class="desc">${esc(p.description)}</td><td>${esc(p.category)}</td><td class="num">${p.type === "income" ? "+" : ""}${yen(p.amount)}</td></tr>`).join("")}</tbody></table></div>
-    ${items.length > 10 ? `<p class="small muted">先頭 10 件を表示</p>` : ""}`;
-  if (!dryRun) { toast(`${inserted} 件取り込みました`); if (items[0]) $("#tx-month").value = D.ym(items[0].date); render(); }
+  return { items, inserted, skipped, merged, aiCategorized };
+}
+
+// ルールで分からなかった店名（ｶﾝﾀﾞｹﾞｷｼﾞﾖｳ など）を Claude にまとめて分類してもらう
+async function aiCategorize(txs, touched) {
+  if (!txs.length) return 0;
+  const sample = await claude.use("sample");
+  if (!sample) return 0;
+  const names = [...new Set(txs.map((t) => t.description))].slice(0, 80);
+  const cats = ALL_CATEGORIES();
+  try {
+    const out = await sample.json(`カード明細の店名（半角カナや略称）を家計簿のカテゴリに分類してください。JSON オブジェクトだけを返します: {"店名": "カテゴリ", ...}
+カテゴリは次から 1 つ: ${cats.join("、")}。見当がつかない店名は「その他」。
+店名:
+${names.map((n) => "- " + n).join("\n")}`, { modelTier: "default", cache: false });
+    let n = 0;
+    for (const t of txs) {
+      const c = out && typeof out === "object" ? out[t.description] : null;
+      if (c && cats.includes(c) && c !== "その他") { t.category = c; touched.add(D.ym(t.date)); n++; }
+    }
+    return n;
+  } catch { return 0; }
+}
+
+async function uploadCsv(dryRun) {
+  const file = csvForm.file.files[0];
+  if (!file) { toast("ファイルを選んでください"); return; }
+  const r = await importCsv(new Uint8Array(await file.arrayBuffer()), csvForm.account_id.value || null, dryRun);
+  if (!r.items.length) { $("#csv-result").innerHTML = `<p class="neg">明細を読み取れませんでした。日付・金額・内容の列がある CSV か確認してください。</p>`; return; }
+  $("#csv-result").innerHTML = `<p>${r.items.length} 件を読み取り、${dryRun ? "取り込み対象" : "取り込み"} ${r.inserted} 件／重複スキップ ${r.skipped} 件${r.merged ? `／メールで取り込み済みの明細と統合 ${r.merged} 件` : ""}${r.aiCategorized ? `／AI がカテゴリを判定 ${r.aiCategorized} 件` : ""}</p>
+    <div class="table-wrap"><table><tbody>${r.items.slice(0, 10).map((p) => `<tr><td>${p.date}</td><td class="desc">${esc(p.description)}</td><td>${esc(p.category)}</td><td class="num">${p.type === "income" ? "+" : ""}${yen(p.amount)}</td></tr>`).join("")}</tbody></table></div>
+    ${r.items.length > 10 ? `<p class="small muted">先頭 10 件を表示</p>` : ""}`;
+  if (!dryRun) { toast(`${r.inserted} 件取り込みました`); if (r.items[0]) $("#tx-month").value = D.ym(r.items[0].date); render(); }
 }
 $("#csv-preview").addEventListener("click", () => uploadCsv(true));
 csvForm.addEventListener("submit", (e) => { e.preventDefault(); uploadCsv(false); });
