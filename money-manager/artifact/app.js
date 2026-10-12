@@ -1058,6 +1058,27 @@ function brandOf(a) {
 const inkFor = (hex) => { const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; return 0.299 * r + 0.587 * g + 0.114 * b > 170 ? "#1a1a19" : "#ffffff"; };
 const avatar = (a) => { const { c, l } = brandOf(a); return `<span class="avatar" style="background:${c};color:${inkFor(c)}" aria-hidden="true">${esc(l)}</span>`; };
 const accDot = (a) => (a ? `<span class="acc-dot" style="background:${brandOf(a).c}"></span>${esc(a.institution && a.institution.length <= 8 ? a.institution : a.name)}` : "");
+// お店はブランド色の丸バッジ（ロゴ画像は使わず、色と頭文字で見分けられるようにする）
+const MERCHANTS = [
+  [["ファミリーマート", "ファミマ", "FAMILYMART"], "#00a040", "F"], [["ローソン", "LAWSON"], "#0068b7", "L"], [["セブンイレブン", "セブン-イレブン", "7-ELEVEN", "SEVEN-ELEVEN"], "#f58220", "7"],
+  [["ミニストップ"], "#003f98", "M"], [["ニューデイズ", "NEWDAYS"], "#0a7d3b", "N"], [["デイリーヤマザキ"], "#e60012", "D"],
+  [["マクドナルド", "MCDONALD"], "#da291c", "M", "#ffc72c"], [["スターバックス", "STARBUCKS"], "#00704a", "S"], [["ドトール"], "#1d2087", "D", "#f8b500"], [["タリーズ"], "#0b2a4a", "T"],
+  [["すき家"], "#e60012", "す"], [["吉野家"], "#f39800", "吉"], [["松屋"], "#f6c300", "松"], [["サイゼリヤ"], "#008c3a", "サ"], [["ガスト"], "#e6001f", "ガ"], [["コメダ"], "#7a3f1d", "コ"],
+  [["まいばすけっと", "マイバスケット"], "#e60012", "ま"], [["イオン", "AEON"], "#b6007a", "イ"], [["西友"], "#e60012", "西"], [["ライフ"], "#e95513", "ラ"], [["成城石井"], "#a51e36", "成"], [["業務スーパー"], "#00913a", "業"],
+  [["AMAZON", "アマゾン"], "#232f3e", "a", "#ff9900"], [["楽天市場", "楽天モバイル", "RAKUTEN"], "#bf0000", "楽"], [["APPLE"], "#555555", "A"], [["UBER"], "#06c167", "U", "#000000"], [["出前館"], "#e60012", "出"],
+  [["ユニクロ", "UNIQLO"], "#ff0000", "U"], [["ジーユー"], "#0044a5", "GU"], [["無印良品", "MUJI"], "#7f0019", "無"], [["ニトリ"], "#009e5a", "ニ"], [["ダイソー", "DAISO"], "#e4007f", "D"],
+  [["マツモトキヨシ", "マツキヨ"], "#fcc800", "マ", "#1a1a19"], [["ウエルシア"], "#e60012", "ウ"], [["ツルハ"], "#e60012", "ツ"], [["洋服の青山"], "#1d2c6b", "青"],
+  [["モバイルパスモ", "PASMO"], "#e4007f", "P"], [["モバイルスイカ", "SUICA"], "#2e9b3a", "S"], [["CLAUDE", "ANTHROPIC"], "#d97757", "C"], [["東京ガス"], "#0073c8", "ガ"],
+  [["NETFLIX"], "#e50914", "N"], [["SPOTIFY"], "#1db954", "S", "#000000"], [["TOHOシネマズ", "トウホウシネマ"], "#c8102e", "T"], [["紀伊國屋", "紀伊国屋"], "#004098", "紀"],
+].map(([keys, c, l, ink]) => [keys.map((k) => kanaKey(k)), c, l, ink]);
+function merchantOf(desc) {
+  const k = kanaKey(desc);
+  // 短い名前（ジーユー→ジユ、イオン など）は「新宿」「エイチケイオン」に紛れるので、先頭に来たときだけ
+  for (const [keys, c, l, ink] of MERCHANTS) if (keys.some((x) => x && (x.length <= 3 ? k.startsWith(x) : k.includes(x)))) return { c, l, ink };
+  return null;
+}
+const merchantBadge = (desc) => { const m = merchantOf(desc); return m ? `<span class="avatar" style="background:${m.c};color:${m.ink || inkFor(m.c)}" aria-hidden="true">${esc(m.l)}</span>` : null; };
+
 // カテゴリは色が「そのカテゴリ」に付く（順位では変えない）。8 色を超える分はグレー
 const CAT_SLOT = { 交通: 1, 外食: 2, 食費: 3, コンビニ: 4, "衣服・美容": 5, 日用品: 6, "趣味・娯楽": 7, ネットショッピング: 8 };
 const catColor = (c) => (CAT_SLOT[c] ? `var(--series-${CAT_SLOT[c]})` : "var(--series-other)");
@@ -1357,7 +1378,7 @@ function renderTxTable() {
   const WD = "月火水木金土日";
   $("#tx-table").innerHTML = rows.length ? Object.entries(byDay).map(([d, ts]) => `<div class="day-head">${md(d)}（${WD[D.weekday(D.parse(d))]}）</div>
     <div class="tx-list">${ts.map((t) => { const a = accounts().find((x) => x.id === t.account_id) || S.accounts.items.find((x) => x.id === t.account_id);
-      return `<div class="tx-row">${t.type === "transfer" ? '<span class="cat-ico" style="--c:var(--muted)" aria-hidden="true">⇄</span>' : t.type === "income" ? '<span class="cat-ico" style="--c:var(--good)" aria-hidden="true">💰</span>' : catIcon(t.category)}
+      return `<div class="tx-row">${t.type === "transfer" ? '<span class="cat-ico" style="--c:var(--muted)" aria-hidden="true">⇄</span>' : t.type === "income" ? '<span class="cat-ico" style="--c:var(--good)" aria-hidden="true">💰</span>' : merchantBadge(t.description) || catIcon(t.category)}
       <div class="tx-main"><div class="tx-desc">${esc(t.description)}</div>
         <div class="tx-meta">${esc(t.category)}${a ? `<span class="sep">·</span>${accDot(a)}` : ""}${t.recurring_id ? `<span class="tag">固定費</span>` : ""}${t.own_share != null && t.own_share < t.amount ? `<span class="tag">自分の分 ${yen(t.own_share)}</span>` : ""}${t.source === "gmail" ? '<span class="tag">メール</span>' : ""}</div>
         ${t.memo ? `<div class="tx-memo">${esc(t.memo)}</div>` : ""}</div>
