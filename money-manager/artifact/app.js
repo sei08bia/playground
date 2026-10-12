@@ -803,6 +803,21 @@ async function syncGmail({ silent = false } = {}) {
       const type = p.refund ? "income" : "expense";
       const dup = allTx().find((t) => t.amount === p.amount && t.type === type && (t.account_id || null) === accountId && ["csv", "manual"].includes(t.source) && !t.mail_id && Math.abs(D.parse(t.date) - D.parse(p.date)) <= 3);
       if (dup) { dup.mail_id = m.id; touchedMonths.add(D.ym(dup.date)); summary.merged++; logMail({ ...base, status: "merged", detail: `既存の明細と同じ: ${dup.date} ${dup.description}` }); continue; }
+      // 楽天カードなどは同じ利用に【速報版】（利用先なし）と通常版（利用先あり）の 2 通が届く。2 通目は 1 件にまとめ、利用先が分かれば書き換える
+      const generic = (d) => !d || /のご利用$/.test(d);
+      const twin = allTx().find((t) => t.source === "gmail" && t.mail_id !== m.id && t.amount === p.amount && t.type === type && (t.account_id || null) === accountId &&
+        Math.abs(D.parse(t.date) - D.parse(p.date)) <= 3 && (generic(t.description) || generic(p.description)));
+      if (twin) {
+        if (generic(twin.description) && !generic(p.description)) {
+          const rec = type === "expense" ? matchRecurring(p.description) : null;
+          Object.assign(twin, { description: p.description, recurring_id: twin.recurring_id || rec,
+            category: twin.category === "未分類" || twin.category === guessCategory(twin.description) ? (p.refund ? "収入・返金" : guessCategory(p.description)) : twin.category });
+        }
+        twin.mail_ids = [...new Set([...(twin.mail_ids || []), m.id])];
+        touchedMonths.add(D.ym(twin.date)); summary.merged++;
+        logMail({ ...base, status: "merged", detail: `速報版と同じ利用: ${twin.date} ${twin.description}` });
+        continue;
+      }
       touchedMonths.add(addTx({ date: p.date, amount: p.amount, type, category: p.refund ? "収入・返金" : guessCategory(p.description), account_id: accountId,
         description: p.description, recurring_id: type === "expense" ? matchRecurring(p.description) : null, source: "gmail", mail_id: m.id }));
       summary.imported++;
