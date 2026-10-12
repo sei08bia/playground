@@ -203,7 +203,11 @@ function recurringSummary(rec, today) {
 const inRange = (s, a, b) => { const d = D.parse(s); return a <= d && d < b; };
 // 立て替えた明細は自分の負担額だけを支出に数える（カードの請求額との照合は元の金額のまま）
 const mine = (t) => (t.own_share != null && t.own_share >= 0 && t.own_share < t.amount ? t.own_share : t.amount);
-const variableSpending = (txs, a, b) => txs.filter((t) => t.type === "expense" && !t.recurring_id && inRange(t.date, a, b)).reduce((s, t) => s + mine(t), 0);
+// PayPay・楽天キャッシュで受け取った立替の精算は、その分を支出から差し引く（自分の分を毎回計算しなくてよい）。
+// 「自分の分」を入力済みの明細の精算（settles にその明細の id）は二重に引かない
+const isSettle = (t) => t.type === "transfer" && t.category === "立替の精算" && !t.settles;
+const settledIn = (txs, a, b, day) => txs.filter((t) => isSettle(t) && inRange(t.date, a, b) && (day == null || D.parse(t.date) === day)).reduce((s, t) => s + t.amount, 0);
+const variableSpending = (txs, a, b) => txs.filter((t) => t.type === "expense" && !t.recurring_id && inRange(t.date, a, b)).reduce((s, t) => s + mine(t), 0) - settledIn(txs, a, b);
 
 function budgetSummary(st, rec, txs, today) {
   const [start, end] = periodBounds(today, st.cycle_start_day);
@@ -215,8 +219,9 @@ function budgetSummary(st, rec, txs, today) {
   const savingsGoal = Number(st.savings_goal) || 0;
   const variableBudget = income - rs.monthly_spending - rs.monthly_investment - savingsGoal;
   const expenses = txs.filter((t) => t.type === "expense" && inRange(t.date, start, end));
-  const spent = expenses.filter((t) => !t.recurring_id).reduce((s, t) => s + mine(t), 0);
-  const todaySpent = expenses.filter((t) => !t.recurring_id && D.parse(t.date) === today).reduce((s, t) => s + mine(t), 0);
+  const reimbursed = settledIn(txs, start, end);
+  const spent = expenses.filter((t) => !t.recurring_id).reduce((s, t) => s + mine(t), 0) - reimbursed;
+  const todaySpent = expenses.filter((t) => !t.recurring_id && D.parse(t.date) === today).reduce((s, t) => s + mine(t), 0) - settledIn(txs, start, end, today);
   const remaining = variableBudget - spent;
   const daily = daysLeft > 0 ? Math.floor((remaining + todaySpent) / daysLeft) : remaining;
   const expected = totalDays ? (variableBudget * elapsed) / totalDays : 0;
@@ -235,7 +240,7 @@ function budgetSummary(st, rec, txs, today) {
   const avg = withData.length ? Math.round(withData.reduce((s, v) => s + v, 0) / withData.length) : null;
   return { period: { start: D.fmt(start), end: D.fmt(end - 1), total_days: totalDays, elapsed_days: elapsed, days_left: daysLeft },
     income, planned_income: planned, actual_income: actualIncome, fixed_monthly: rs.monthly_spending, investment_monthly: rs.monthly_investment,
-    savings_goal: savingsGoal, variable_budget: variableBudget, spent, today_spent: todaySpent, remaining, daily_allowance: daily,
+    savings_goal: savingsGoal, variable_budget: variableBudget, spent, reimbursed, today_spent: todaySpent, remaining, daily_allowance: daily,
     today_remaining: daily - todaySpent, expected_by_now: Math.round(expected), pace_ratio: pace, projected_spent: projected,
     projected_surplus: variableBudget - projected, status, categories, history, avg_variable_spent: avg, recurring: rs };
 }
@@ -866,7 +871,7 @@ function adviceContext(d) {
   const pick = (o, ks) => Object.fromEntries(ks.map((k) => [k, o[k]]));
   return {
     today: d.today, period: b.period,
-    budget: pick(b, ["income", "fixed_monthly", "investment_monthly", "savings_goal", "variable_budget", "spent", "today_spent", "remaining", "daily_allowance", "today_remaining", "expected_by_now", "pace_ratio", "projected_spent", "projected_surplus", "status", "avg_variable_spent"]),
+    budget: pick(b, ["income", "fixed_monthly", "investment_monthly", "savings_goal", "variable_budget", "spent", "reimbursed", "today_spent", "remaining", "daily_allowance", "today_remaining", "expected_by_now", "pace_ratio", "projected_spent", "projected_surplus", "status", "avg_variable_spent"]),
     past_periods_variable_spent: b.history, categories: b.categories,
     recurring: d.recurring.filter((r) => r.active !== false).map((r) => ({ name: r.name, kind: r.kind, amount: r.amount, cycle: r.cycle, variable: !!r.variable, note: r.note || "" })),
     recurring_monthly_by_kind: b.recurring.monthly_by_kind, upcoming_bills_next_31_days: b.recurring.upcoming,
@@ -958,7 +963,7 @@ function renderDashboard() {
   const cls = b.status === "ok" ? "" : b.status === "warning" ? "warning" : "over";
   $("#pace-card").innerHTML = `<div class="row-between wrap"><h2>今期の使ったペース</h2><span class="small muted">縦線＝今日時点の目安（${yen(b.expected_by_now)}）</span></div>
     <div class="meter" role="img" aria-label="予算 ${yen(b.variable_budget)} のうち ${yen(b.spent)} 使用"><div class="fill ${cls}" style="width:${Math.min(100, (b.spent / budget) * 100)}%"></div><div class="mark" style="left:calc(${Math.min(100, (b.period.elapsed_days / b.period.total_days) * 100)}% - 1px)"></div></div>
-    <div class="meter-legend"><span>使った ${yen(b.spent)}（${pct(b.spent / budget)}）</span>
+    <div class="meter-legend"><span>使った ${yen(b.spent)}（${pct(b.spent / budget)}）${b.reimbursed ? `<span class="muted">・立替の精算 ${yen(b.reimbursed)} を差し引き済み</span>` : ""}</span>
       <span>このペースだと月末 ${yen(b.projected_spent)} → ${b.projected_surplus >= 0 ? `${yen(b.projected_surplus)} 余る見込み` : `<b class="neg">${yen(-b.projected_surplus)} 足りない見込み</b>`}</span>
       <span>収入 ${yen(b.income)} − 固定費 ${yen(b.fixed_monthly)} − 積立 ${yen(b.investment_monthly)} − 先取り貯金 ${yen(b.savings_goal)}</span></div>`;
 
