@@ -70,6 +70,31 @@ def test_rakuten_bill():
     assert (p.amount, p.payment_date, p.confirmed) == (123456, "2026-09-28", True)
 
 
+RAKUTEN_ESTIMATE = """━━━━━━━━━━
+ お支払予定金額のご案内
+━━━━━━━━━━
+2026年10月分のお支払予定金額をご案内いたします。
+
+[合計お支払予定金額]
+54,321円
+
+[お支払日]
+2026/10/27
+
+[ご利用カード]
+楽天カード（Mastercard）
+
+[お支払予定金額]
+54,321円
+"""
+
+
+def test_rakuten_estimate_bill():
+    p = mail_parser.parse_mail("info@mail.rakuten-card.co.jp", "【楽天カード】お支払予定金額のご案内", RAKUTEN_ESTIMATE)
+    assert (p.kind, p.amount, p.payment_date, p.confirmed) == ("bill", 54321, "2026-10-27", False)
+    assert p.card_label == "楽天カード(Mastercard)"
+
+
 def test_rakuten_notice_without_amount_is_ignored():
     p = mail_parser.parse_mail("info@mail.rakuten-card.co.jp",
                                "【お知らせ】今月のご請求金額とお支払い金額調整サービスのご案内", RAKUTEN_NOTICE)
@@ -138,6 +163,15 @@ def test_ingest_bill_and_usage(conn):
     assert (bill["account_id"], bill["amount"], bill["payment_date"]) == (rakuten, 123456, "2026-09-28")
     tx = db.rows(conn, "SELECT * FROM transactions")[0]
     assert (tx["account_id"], tx["amount"], tx["category"], tx["source"]) == (smbc, 1280, "コンビニ", "gmail")
+
+
+def test_estimate_does_not_overwrite_confirmed_bill(conn):
+    add_card(conn, "楽天", "楽天カード")
+    confirmed = RAKUTEN_BILL.replace("2026/09/28", "2026/10/27")
+    gmail_sync.ingest(conn, [mail("c", "info@mail.rakuten-card.co.jp", "カードご請求金額のご案内", confirmed),
+                             mail("e", "info@mail.rakuten-card.co.jp", "お支払予定金額のご案内", RAKUTEN_ESTIMATE)])
+    bill = db.rows(conn, "SELECT amount, confirmed FROM card_bills")[0]
+    assert (bill["amount"], bill["confirmed"]) == (123456, 1)
 
 
 def test_keyword_picks_between_two_cards_of_same_issuer(conn):

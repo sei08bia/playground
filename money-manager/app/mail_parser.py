@@ -39,13 +39,13 @@ ISSUERS: dict[str, str] = {
 DATE_LABELS = r"(?:ご?利用日時?|ご?利用年月日|お取引日時?|取引日時?|決済日時?|承認日時?)"
 MERCHANT_LABELS = r"(?:ご?利用先|ご?利用店名?|ご?利用場所|ご?利用加盟店|加盟店名?|店舗名|ご?利用内容|お支払先|支払先)"
 AMOUNT_LABELS = r"(?:ご?利用金額|お?取引金額|決済金額|お支払い?金額|ご?請求金額|承認金額)"
-BILL_AMOUNT_LABELS = r"(?:ご?請求金額|お?支払い?金額|お引落し?金額|引落金額|ご請求額|お支払額)"
+BILL_AMOUNT_LABELS = r"(?:合計)?(?:ご?請求(?:予定)?金額|お?支払い?(?:予定)?金額|お引落し?金額|引落金額|ご請求額|お支払額)"
 BILL_DATE_LABELS = r"(?:お?支払い?日|お引落し?日|口座振替日|引落日|お支払予定日)"
 
 SEP = r"[\s:：】\]）)]*"   # ラベルと値の間の記号・空白（改行も含む）
 
 NOTIFY_SUBJECT = re.compile(r"(利用|ご利用|決済|承認|速報)")
-BILL_SUBJECT = re.compile(r"(ご?請求(金額|額)|お支払い?金額|お引落し?金額).*(案内|お知らせ|確定)")
+BILL_SUBJECT = re.compile(r"(ご?請求(予定)?(金額|額)|お支払い?(予定)?金額|お引落し?金額).*(案内|お知らせ|確定)")
 CANCEL_WORDS = re.compile(r"(取消|取り消し|キャンセル|返品|売上取消)")
 # 利用通知のように見えても取り込まないメール
 IGNORE_SUBJECT = re.compile(r"(キャンペーン|ポイント|キャッシュバック|お得|おトク|特典|プレゼント|エントリー|ご案内します|不正|ご利用確認|ご注意|会員ステージ|メンテナンス|サービス終了)")
@@ -152,7 +152,7 @@ def parse_mail(sender: str, subject: str, body: str, received: datetime | None =
         return ParsedMail("ignored", reason="カード会社のメールではありません")
 
     # --- 請求額の案内 ---
-    if BILL_SUBJECT.search(subject) or re.search(r"ご請求金額のご案内|お支払い金額のご案内", text[:300]):
+    if BILL_SUBJECT.search(subject) or re.search(r"ご請求金額のご案内|お支払い?(予定)?金額のご案内", text[:300]):
         amount = _find_amount(text, BILL_AMOUNT_LABELS)
         pay = _find_date(text, BILL_DATE_LABELS)
         if amount is not None and pay:

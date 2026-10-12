@@ -164,7 +164,10 @@ def ingest(conn: sqlite3.Connection, mails: Iterable[Mail]) -> dict:
                 continue
             conn.execute(
                 "INSERT INTO card_bills(account_id, payment_date, amount, confirmed, source) VALUES (?, ?, ?, ?, 'gmail') "
-                "ON CONFLICT(account_id, payment_date) DO UPDATE SET amount = excluded.amount, confirmed = excluded.confirmed",
+                "ON CONFLICT(account_id, payment_date) DO UPDATE SET "
+                # 確定額を、あとから処理した予定額で上書きしない
+                "amount = CASE WHEN card_bills.confirmed = 1 AND excluded.confirmed = 0 THEN card_bills.amount ELSE excluded.amount END, "
+                "confirmed = MAX(card_bills.confirmed, excluded.confirmed)",
                 (account_id, p.payment_date, p.amount, int(p.confirmed)))
             summary["bills"] += 1
             _record(conn, mail, "bill", f"{p.amount:,}円 {p.payment_date}払い{'（確定）' if p.confirmed else '（予定）'}")

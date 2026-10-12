@@ -476,13 +476,13 @@ const L = {
   date: "(?:ご?利用日時?|ご?利用年月日|お取引日時?|取引日時?|決済日時?|承認日時?)",
   merchant: "(?:ご?利用先|ご?利用店名?|ご?利用場所|ご?利用加盟店|加盟店名?|店舗名|ご?利用内容|お支払先|支払先)",
   amount: "(?:ご?利用金額|お?取引金額|決済金額|お支払い?金額|ご?請求金額|承認金額)",
-  billAmount: "(?:ご?請求金額|お?支払い?金額|お引落し?金額|引落金額|ご請求額|お支払額)",
+  billAmount: "(?:合計)?(?:ご?請求(?:予定)?金額|お?支払い?(?:予定)?金額|お引落し?金額|引落金額|ご請求額|お支払額)",
   billDate: "(?:お?支払い?日|お引落し?日|口座振替日|引落日|お支払予定日)",
 };
 const SEP = "[\\s:：】\\]）)]*";
 const HEAD = "^[ \\t◇◆■□●○・*＊【\\[]*";
 const NOTIFY_SUBJECT = /(利用|ご利用|決済|承認|速報)/;
-const BILL_SUBJECT = /(ご?請求(金額|額)|お支払い?金額|お引落し?金額).*(案内|お知らせ|確定)/;
+const BILL_SUBJECT = /(ご?請求(予定)?(金額|額)|お支払い?(予定)?金額|お引落し?金額).*(案内|お知らせ|確定)/;
 const CANCEL = /(取消|取り消し|キャンセル|返品|売上取消)/;
 const IGNORE_SUBJECT = /(キャンペーン|ポイント|キャッシュバック|お得|おトク|特典|プレゼント|エントリー|ご案内します|不正|ご利用確認|ご注意|会員ステージ|メンテナンス|サービス終了)/;
 
@@ -505,7 +505,7 @@ function parseMail(sender, subject, body, receivedDate) {
   subject = String(subject || "").normalize("NFKC");
   const text = String(body || "").normalize("NFKC").replace(/\r\n?/g, "\n");
   if (!issuer) return { kind: "ignored", reason: "カード会社のメールではありません" };
-  if (BILL_SUBJECT.test(subject) || /ご請求金額のご案内|お支払い金額のご案内/.test(text.slice(0, 300))) {
+  if (BILL_SUBJECT.test(subject) || /ご請求金額のご案内|お支払い?(予定)?金額のご案内/.test(text.slice(0, 300))) {
     const amount = findAmount(text, L.billAmount), pay = findDate(text, L.billDate);
     if (amount != null && pay) {
       const head = text.slice(0, 2000);
@@ -617,8 +617,12 @@ async function syncGmail({ silent = false } = {}) {
       const accountId = matchCard(p);
       if (p.kind === "bill") {
         if (!accountId) { summary.no_account++; logMail({ ...base, status: "no_account", detail: `${p.issuer} ${p.amount.toLocaleString()}円 ${p.payment_date}払い（このカードを登録すると反映されます）` }); continue; }
-        S.bills.items = [...S.bills.items.filter((b) => !(b.account_id === accountId && b.payment_date === p.payment_date)),
-          { account_id: accountId, payment_date: p.payment_date, amount: p.amount, confirmed: p.confirmed, mail_id: m.id }].slice(-60);
+        const prev = S.bills.items.find((b) => b.account_id === accountId && b.payment_date === p.payment_date);
+        // 確定額を、あとから処理した予定額で上書きしない
+        if (!(prev && prev.confirmed !== false && !p.confirmed)) {
+          S.bills.items = [...S.bills.items.filter((b) => b !== prev),
+            { account_id: accountId, payment_date: p.payment_date, amount: p.amount, confirmed: p.confirmed, mail_id: m.id }].slice(-60);
+        }
         summary.bills++;
         logMail({ ...base, status: "bill", detail: `${p.amount.toLocaleString()}円 ${p.payment_date}払い${p.confirmed ? "（確定）" : "（予定）"}` });
         continue;
