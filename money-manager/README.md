@@ -29,6 +29,13 @@
 - 今日時点の予定額より使っていて、このままだと月末に予算を超える見込みなら「ペース早め」、超えたら「予算オーバー」と表示します。
 - NISA・特定口座は「投資」、iDeCo・企業型DC は「年金（原則60歳まで引き出し不可）」として、すぐ使えるお金（預金 − カード未払い）とは分けて表示します。
 
+## claude.ai 版（インストール不要）
+
+`artifact/` は同じ機能を claude.ai 上の 1 ページにしたものです。データは claude.ai に保存され（持ち主だけが読める設定）、
+Gmail は claude.ai に接続済みの Gmail コネクタ、AI アドバイスは claude.ai の Claude を使うので、Python・アプリ パスワード・API キーは不要です。
+`python artifact/build.py` で 1 枚の HTML（`artifact/dist/okane.html`）にまとめて公開しています。
+Gmail の取り込みはページを開いている間だけ動きます（開いたときと、開いている間は設定した間隔ごと）。
+
 ## 使い方
 
 ### かんたん起動（おすすめ）
@@ -107,6 +114,7 @@ IMAP を使わない場合は、Gmail から保存した `.eml` ファイルを�
 ## 構成
 
 ```
+artifact/        claude.ai 版（markup.html・app.js・build.py）
 start-mac.command / start-windows.bat   ダブルクリック起動（初回に .venv を作って部品をインストール）
 .env.example     設定ファイルのひな形（.env にコピーして使う）
 app/
