@@ -357,14 +357,14 @@ function dashboard() {
 // ================================================================== CSV（csv_import.py の移植）
 const CATEGORY_RULES = [
   ["食費", ["スーパー", "イオン", "西友", "マルエツ", "業務スーパー", "成城石井", "まいばすけっと", "マイバスケット", "生協", "コープ", "オオゼキ", "サミット", "ライフコーポ", "ライフ "]],
-  ["コンビニ", ["セブン", "ローソン", "ファミリーマート", "ファミマ", "ミニストップ", "デイリーヤマザキ"]],
-  ["外食", ["マクドナルド", "スターバックス", "スタバ", "すき家", "吉野家", "松屋", "ガスト", "サイゼリヤ", "UBER EATS", "UBEREATS", "出前館", "レストラン", "カフェ", "居酒屋", "ドトール", "タリーズ", "コメダ", "ラーメン", "ケンタッキー", "モスバーガー", "日高屋", "珈琲", "コーヒー"]],
-  ["日用品", ["マツモトキヨシ", "ウエルシア", "ツルハ", "スギ薬局", "ダイソー", "無印", "ニトリ", "ドラッグ", "カインズ"]],
+  ["コンビニ", ["セブン", "ローソン", "ファミリーマート", "ファミマ", "ミニストップ", "デイリーヤマザキ", "ニューデイズ"]],
+  ["外食", ["マクドナルド", "スターバックス", "スタバ", "すき家", "吉野家", "松屋", "ガスト", "サイゼリヤ", "UBER EATS", "UBEREATS", "出前館", "レストラン", "カフェ", "居酒屋", "ドトール", "タリーズ", "コメダ", "ラーメン", "ケンタッキー", "モスバーガー", "日高屋", "珈琲", "コーヒー", "オリジン", "プロント"]],
+  ["日用品", ["マツモトキヨシ", "マツキヨ", "トモズ", "ウエルシア", "ツルハ", "スギ薬局", "ダイソー", "無印", "ニトリ", "ドラッグ", "カインズ"]],
   ["交通", ["JR", "モバイルSUICA", "SUICA", "PASMO", "パスモ", "スイカ", "メトロ", "タクシー", "鉄道", "バス", "HIGHWAYBUS", "ETC", "高速", "えきねっと"]],
   ["ネットショッピング", ["AMAZON", "アマゾン", "楽天市場", "ヤフーショッピング", "ZOZO", "メルカリ"]],
-  ["サブスク", ["NETFLIX", "SPOTIFY", "APPLE.COM", "APPLE COM", "ITUNES", "GOOGLE", "YOUTUBE", "AMAZON PRIME", "プライム", "DISNEY", "U-NEXT", "ADOBE", "CHATGPT", "OPENAI", "ANTHROPIC", "CLAUDE", "オンデマンド"]],
+  ["サブスク", ["NETFLIX", "SPOTIFY", "APPLE.COM", "APPLE COM", "ITUNES", "GOOGLE", "YOUTUBE", "AMAZON PRIME", "プライム", "DISNEY", "U-NEXT", "ADOBE", "CHATGPT", "OPENAI", "ANTHROPIC", "CLAUDE", "オンデマンド", "スカパー"]],
   ["通信", ["DOCOMO", "ドコモ", "ソフトバンク", "SOFTBANK", "楽天モバイル", "AHAMO", "POVO", "LINEMO", "UQ", "NURO"]],
-  ["水道・光熱", ["電力", "でんき", "電気", "ガス", "水道", "ENEOS", "TEPCO", "東京電力", "関西電力"]],
+  ["水道・光熱", ["電力", "でんき", "電気", "ガス", "水道", "スイドウ", "ENEOS", "TEPCO", "東京電力", "関西電力"]],
   ["医療", ["病院", "クリニック", "医院", "歯科", "薬局"]],
   ["趣味・娯楽", ["映画", "TOHO", "トウホウシネマ", "シネマ", "テアトル", "劇場", "ゲキジョウ", "チケット", "書店", "ショテン", "紀伊國屋", "STEAM", "NINTENDO", "任天堂", "PLAYSTATION", "ゲーム", "カラオケ", "美術館"]],
   ["衣服・美容", ["ユニクロ", "UNIQLO", "ジーユー", "ZARA", "H&M", "洋服の青山", "美容", "ヘア", "サロン"]],
@@ -440,7 +440,12 @@ function parseDateStr(v) {
   if (mo < 1 || mo > 12 || d < 1 || d > D.dim(y, mo)) return null;
   return D.fmt(D.ymd(y, mo, d));
 }
+// 楽天カードの明細は「ＪＣＢ国内利用　QP  ﾌｱﾐﾘｰﾏｰﾄ」のように決済手段が前に付くことがある
+const PAY_PREFIX = /^(?:ＪＣＢ|JCB|マスター|ＶＩＳＡ|VISA|ビザ|ＡＭＥＸ|AMEX|アメックス)(?:国内|海外)利用[\s\u3000]*(?:QP|ＱＰ|MZZ|ＭＺＺ|iD|ｉＤ|ＩＤ)?[\s\u3000]*/;
+function cleanShop(desc) { return String(desc || "").replace(PAY_PREFIX, "").trim(); }
+
 function csvItem(date, signed, desc, cat) {
+  desc = cleanShop(desc);
   const type = signed >= 0 ? "expense" : "income";
   let category = cat && cat !== "未分類" ? cat : guessCategory(desc);
   if (type === "income" && category === "未分類") category = "収入・返金";
@@ -1124,6 +1129,11 @@ async function importCsv(buf, accountId, dryRun) {
   if (!items.length) return { items, inserted: 0, skipped: 0, merged: 0 };
   await ensureMonths(items.map((it) => D.ym(it.date)));
   const hashes = new Set(allTx().map((t) => t.h).filter(Boolean));
+  // 同じ店名に前に付けた（または直した）カテゴリを引き継ぐ。新しい明細ほど優先
+  const learned = {};
+  for (const t of [...allTx()].sort((a, b) => a.date.localeCompare(b.date)))
+    if (t.category && t.category !== "未分類" && !t.recurring_id) learned[kanaKey(cleanShop(t.description))] = t.category;
+  for (const it of items) { const c = learned[kanaKey(it.description)]; if (c && it.type === "expense") it.category = c; }
   const occ = {};
   let inserted = 0, skipped = 0, merged = 0;
   const touched = new Set();
