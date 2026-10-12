@@ -1,6 +1,7 @@
 """お金の見える化アプリ — FastAPI エントリポイント。
 
-起動: uvicorn app.main:app --reload  →  http://localhost:8000
+起動: start-mac.command / start-windows.bat をダブルクリック
+      （または uvicorn app.main:app --reload）→  http://localhost:8000
 """
 from __future__ import annotations
 
@@ -16,7 +17,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import advisor, csv_import, db, gmail_sync, mail_parser, service
+from .env import load_env
+
+load_env()  # GMAIL_* / ANTHROPIC_API_KEY を .env から読む（他のモジュールより先に）
+
+from . import advisor, csv_import, db, gmail_sync, mail_parser, service  # noqa: E402
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
 

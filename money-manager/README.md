@@ -31,13 +31,23 @@
 
 ## 使い方
 
+### かんたん起動（おすすめ）
+
+1. [Python](https://www.python.org/downloads/) 3.10 以上をインストール（Windows は「Add Python to PATH」にチェック）
+2. `money-manager` フォルダの起動ファイルをダブルクリック
+   - Mac: `start-mac.command`（初回は「開発元を確認できません」と出るので、右クリック →「開く」）
+   - Windows: `start-windows.bat`（「Windows によって PC が保護されました」と出たら「詳細情報」→「実行」）
+3. 初回は必要な部品を自動でインストールし、設定ファイル `.env` が開きます。Gmail のアドレスとアプリ パスワード（下記）を書いて保存
+4. ブラウザで http://localhost:8000 が開きます。止めるときは黒いウィンドウを閉じます
+
+`.env` は Git に入らないので、パスワードを書いても公開されません。あとから変えるときは `.env` を編集して起動し直してください。
+
+### コマンドで起動する場合
+
 ```bash
 cd money-manager
 pip install -r requirements.txt
-
-# （任意）AI アドバイスを有効にする
-export ANTHROPIC_API_KEY=sk-ant-...
-
+cp .env.example .env   # 必要なら Gmail・API キーを書く（環境変数で渡してもよい）
 uvicorn app.main:app --reload
 # → http://localhost:8000
 ```
@@ -76,21 +86,20 @@ python -m pytest
 ### 設定
 
 1. Google アカウントで 2 段階認証をオンにして [アプリ パスワード](https://myaccount.google.com/apppasswords) を作る
-2. 環境変数を設定して起動する
+2. `.env` に書いて起動する（環境変数で渡しても可）
 
-```bash
-export GMAIL_ADDRESS=you@gmail.com
-export GMAIL_APP_PASSWORD="xxxx xxxx xxxx xxxx"
-uvicorn app.main:app
+```
+GMAIL_ADDRESS=you@gmail.com
+GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
 ```
 
-IMAP で読み取り専用に接続し、メールを既読にもしません。アプリ パスワードは環境変数からだけ読み、DB には保存しません。
+IMAP で読み取り専用に接続し、メールを既読にもしません。アプリ パスワードは `.env` か環境変数からだけ読み、DB には保存しません。
 （Gmail API の OAuth は、個人用の「テスト中」アプリだと更新トークンが 7 日で切れて自動取り込みが止まるため、IMAP にしています。）
 IMAP を使わない場合は、Gmail から保存した `.eml` ファイルを「明細」画面から取り込むこともできます。
 
 ## AI アドバイスについて
 
-- `ANTHROPIC_API_KEY` があると Claude（既定 `claude-opus-5-5`、`MONEY_ADVISOR_MODEL` で変更可）が回答します。無い場合や API エラー時はルールベースの簡易診断を返します。
+- `ANTHROPIC_API_KEY`（`.env` か環境変数）があると Claude（既定 `claude-opus-5-5`、`MONEY_ADVISOR_MODEL` で変更可）が回答します。無い場合や API エラー時はルールベースの簡易診断を返します。
 - Claude に送るのは **集計値**（予算・残高・カテゴリ別合計・固定費の一覧・ほしいものリストなど）だけで、個々の明細の店名などは送りません（`app/advisor.py` の `build_context`）。
 - 安全分類器で回答が断られた場合は、サーバー側フォールバック（`fallbacks: "default"`）で別モデルが自動で回答します。
 - 一般的な家計のアドバイスであり、個別の金融商品の売買を勧めるものではありません。
@@ -98,6 +107,8 @@ IMAP を使わない場合は、Gmail から保存した `.eml` ファイルを�
 ## 構成
 
 ```
+start-mac.command / start-windows.bat   ダブルクリック起動（初回に .venv を作って部品をインストール）
+.env.example     設定ファイルのひな形（.env にコピーして使う）
 app/
   main.py        FastAPI のルーティング（REST API + 画面の配信）
   finance.py     集計ロジック（期間・予算・ペース・カードの締め/支払い・純資産・ほしいもの判定）
@@ -107,6 +118,7 @@ app/
   mail_parser.py カード会社のメール（利用通知・請求額）の解析
   gmail_sync.py  Gmail（IMAP）からの取得、明細・請求額への反映、定期取り込み
   db.py          SQLite スキーマと設定
+  env.py         .env の読み込み
 static/          画面（素の HTML/CSS/JS、外部ライブラリなし）
 scripts/seed_demo.py  デモデータ
 tests/
