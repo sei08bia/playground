@@ -943,7 +943,85 @@ function renderRefs() {
   $("#category-list").innerHTML = [...cats].map((c) => `<option value="${esc(c)}">`).join("");
 }
 
+// ------------------------------------------------------------------ やること
+// 前回の CSV 取り込み日（記録がなければ、その口座の CSV 明細のいちばん新しい日付）
+function lastCsv(accId) {
+  const rec = (settings().last_csv || {})[accId];
+  const fromTx = allTx().filter((t) => t.account_id === accId && t.source === "csv").map((t) => t.date).sort().pop();
+  return [rec, fromTx].filter(Boolean).sort().pop() || null;
+}
+const ago = (s) => (s ? D.today() - D.parse(s) : null);
+const agoText = (s) => (s ? `前回 ${s.slice(5).replace("-", "/")}（${ago(s) === 0 ? "今日" : ago(s) + "日前"}）` : "まだ取り込んでいません");
+function todoItems() {
+  const today = D.today(), [y, m, day] = D.parts(today), items = [];
+  const cards = accounts().filter((a) => a.kind === "card");
+  for (const c of cards) {
+    const last = lastCsv(c.id);
+    // 請求額が確定する 12 日ごろ以降に、その月まだ取り込んでいなければお知らせ
+    const due = !last || ago(last) > 35 || (day >= 12 && D.parse(last) < D.ymd(y, m, 12));
+    items.push({ due, title: `${c.name}の CSV を取り込む`, freq: "月1回（毎月12日ごろ）", status: agoText(last), goto: "transactions",
+      how: `楽天e-NAVI にログイン →「ご利用明細」→ 月を選んで「CSV ダウンロード」→ この画面の「明細」タブ →「CSV を取り込む」で「${c.name}」を選んで取り込む。今月分（未確定）も取り込めます。何回取り込んでも二重になりません。` });
+  }
+  const pp = accounts().find((a) => /paypay/i.test(a.name) && a.kind === "emoney");
+  if (pp) {
+    const last = lastCsv(pp.id);
+    items.push({ due: !last || ago(last) > 31, title: "PayPay の CSV を取り込む", freq: "月1回", status: agoText(last), goto: "transactions",
+      how: "PayPay アプリのホーム →［取引履歴］→ 右上の［取引履歴のダウンロード］→ 期間を選んで［ダウンロード申請をする］→ 通知が来たら［申請ステータス］からダウンロード（24 時間以内）→「CSV を取り込む」で選ぶだけ（PayPay は自動で判別します）。受け取った立替の精算は自動で支出から差し引かれます。" });
+  }
+  const stale = accounts().filter((a) => a.kind !== "card" && (!a.updated_at || ago(a.updated_at) > 31 || /未入力/.test(a.note || "")));
+  items.push({ due: stale.length > 0, title: "口座・電子マネー・ポイントの残高を更新する", freq: "月1回", goto: "assets",
+    status: stale.length ? `更新が必要: ${stale.map((a) => a.name).join("、")}` : "すべて1か月以内に更新済み",
+    how: "各アプリで残高を見て「口座・資産」タブで入力。Claude に金額を伝えても入れてもらえます。" });
+  const [ps, pe] = periodBounds(today, settings().cycle_start_day);
+  const unc = allTx().filter((t) => t.type === "expense" && t.category === "未分類" && inRange(t.date, ps, pe));
+  if (unc.length) items.push({ due: true, title: `カテゴリが未分類の明細を確認する（${unc.length} 件）`, freq: "気づいたとき", goto: "transactions",
+    status: unc.slice(0, 3).map((t) => t.description).join("、") + (unc.length > 3 ? " など" : ""), how: "「明細」タブで未分類の行を開いてカテゴリを入れる。直した店名は次から自動で同じカテゴリになります。" });
+  return items;
+}
+const TODO_SOMETIMES = [
+  ["楽天キャッシュや現金で立替の精算を受け取った", "Claude にひとこと（いつ・誰から・いくら・何の精算か）伝えるか、楽天ペイの履歴のスクリーンショットを送る。PayPay で受け取った分は CSV で自動です。"],
+  ["精算ではないお金を受け取った（プレゼント・物の売却など）", "その明細のカテゴリを「立替の精算」から別のものに変える（そのままだと支出から差し引かれてしまうため）。"],
+  ["サブスク・固定費を始めた／やめた", "「固定費・サブスク」タブで追加・停止する。"],
+  ["大きな買い物をしたい", "「ほしいもの」に入れておくと、AI が買っていいタイミングを教えます。"],
+];
+function renderTodos() {
+  const items = todoItems(), due = items.filter((i) => i.due), todos = settings().todos || [];
+  const open = todos.filter((t) => !t.done);
+  const row = (i) => `<li class="todo ${i.due ? "due" : "done"}"><span class="todo-mark" aria-hidden="true">${i.due ? "●" : "✓"}</span><div>
+    <div><b>${esc(i.title)}</b> <span class="small muted">${esc(i.freq)}</span></div>
+    <div class="small ${i.due ? "" : "muted"}">${esc(i.status)}${i.goto ? ` <a href="#" data-goto="${i.goto}">開く</a>` : ""}</div>
+    <details><summary class="small">やり方</summary><p class="small">${esc(i.how)}</p></details></div></li>`;
+  $("#todo-card").innerHTML = `<div class="row-between wrap"><h2>わたしのやること</h2><span class="small ${due.length || open.length ? "neg" : "muted"}">${due.length + open.length ? `今やること ${due.length + open.length} 件` : "今やることはありません"}</span></div>
+    <ul class="todo-list">${[...due, ...items.filter((i) => !i.due)].map(row).join("")}</ul>
+    <h3 class="small">確認待ち・メモ</h3>
+    <ul class="todo-list">${todos.map((t) => `<li class="todo ${t.done ? "done" : "due"}"><label><input type="checkbox" data-todo="${esc(t.id)}" ${t.done ? "checked" : ""}> ${esc(t.text)}</label></li>`).join("") || `<li class="small muted">ありません</li>`}</ul>
+    <form id="todo-add" class="row-between"><input name="text" placeholder="やることを追加（例: 楽天銀行の残高を確認）" aria-label="やることを追加"><button type="submit">追加</button></form>
+    ${todos.some((t) => t.done) ? `<button type="button" class="small" id="todo-clear">完了したものを消す</button>` : ""}
+    <details><summary class="small">そのときだけやること</summary><ul class="small">${TODO_SOMETIMES.map(([a, b]) => `<li><b>${esc(a)}</b>: ${esc(b)}</li>`).join("")}</ul></details>
+    <p class="small muted">自動でやっていること: カード利用通知メールの取り込み・カテゴリ分け（直した店名は覚えます）・予算と「あといくら使えるか」の計算・PayPay で受け取った精算の差し引き。</p>`;
+}
+document.addEventListener("change", (e) => {
+  const id = e.target.dataset?.todo;
+  if (!id) return;
+  S.settings = { ...settings(), todos: (settings().todos || []).map((t) => (t.id === id ? { ...t, done: e.target.checked } : t)) };
+  save("settings"); render();
+});
+document.addEventListener("submit", (e) => {
+  if (e.target.id !== "todo-add") return;
+  e.preventDefault();
+  const text = e.target.text.value.trim();
+  if (!text) return;
+  S.settings = { ...settings(), todos: [...(settings().todos || []), { id: Math.random().toString(36).slice(2, 10), text, done: false }] };
+  save("settings"); render();
+});
+document.addEventListener("click", (e) => {
+  if (e.target.id !== "todo-clear") return;
+  S.settings = { ...settings(), todos: (settings().todos || []).filter((t) => !t.done) };
+  save("settings"); render();
+});
+
 function renderDashboard() {
+  renderTodos();
   const d = dashboard();
   const b = d.budget, w = d.net_worth;
   $("#onboarding").hidden = !(b.income === 0 || !d.accounts.some((a) => a.kind !== "card" && Number(a.balance)));
@@ -1211,6 +1289,7 @@ async function importCsv(buf, accountId, dryRun) {
   let aiCategorized = 0;
   if (!dryRun) aiCategorized = await aiCategorize(allTx().filter((t) => t.source === "csv" && t.category === "未分類" && hashes.has(t.h)), touched);
   for (const ym of touched) save("tx/" + ym);
+  if (!dryRun && accountId) { S.settings = { ...settings(), last_csv: { ...(settings().last_csv || {}), [accountId]: D.fmt(D.today()) } }; save("settings"); }
   return { items, inserted, skipped, merged, aiCategorized };
 }
 

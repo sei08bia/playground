@@ -237,3 +237,13 @@ pre:empty { display: none; }
 .own-share { display: grid; gap: 6px; }
 .split-buttons { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; color: var(--text-2); }
 .split-buttons button { padding: 3px 9px; font-size: 12px; }
+.todo-list { list-style: none; padding: 0; margin: 8px 0; }
+.todo { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.todo:last-child { border-bottom: 0; }
+.todo-mark { width: 1em; flex: none; }
+.todo.due .todo-mark { color: var(--warning-ink); }
+.todo.done .todo-mark { color: var(--positive, var(--accent)); }
+.todo.done label { color: var(--text-2); text-decoration: line-through; }
+.todo details { margin: 2px 0 0; }
+#todo-add { gap: 8px; margin: 6px 0; }
+#todo-add input { flex: 1; min-width: 0; }
