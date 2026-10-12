@@ -86,7 +86,8 @@ function fillForm(form, data) {
     else el.value = v ?? "";
   }
   form.dispatchEvent(new Event("change"));
-  form.scrollIntoView({ behavior: "smooth", block: "start" });
+  const dlg = form.closest("dialog");
+  if (dlg) { if (!dlg.open) dlg.showModal(); } else form.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ================================================================== store
@@ -942,6 +943,7 @@ function render() {
     renderQueued = false;
     renderRefs();
     fillIcons();
+    $("#fab").hidden = !SHEET_FOR_TAB[currentTab];
     ({ dashboard: renderDashboard, transactions: () => { renderTxTable(); renderGmail(); }, assets: renderAccounts, recurring: renderRecurring,
        wishlist: renderWishlist, advice: renderAdviceHistory, settings: renderSettings }[currentTab])?.();
   });
@@ -1042,6 +1044,25 @@ document.addEventListener("click", (e) => {
   save("settings"); render();
 });
 
+// ------------------------------------------------------------------ 口座のブランド色・カテゴリの色
+// 口座は金融機関の色（楽天=赤、ゆうちょ=緑 など）、それ以外は種類ごとの色
+const BRANDS = [[/楽天|rakuten/i, "#bf0000", "楽"], [/ゆうちょ|郵便/, "#5fae3b", "ゆ"], [/paypay/i, "#ff0033", "P"], [/三井住友|smbc|olive/i, "#00804a", "三"],
+  [/三菱|mufg/i, "#d7000f", "三"], [/みずほ/, "#1a3f99", "み"], [/住信|sbi/i, "#0d4ea5", "S"], [/イオン|aeon/i, "#b6007a", "イ"], [/au |auじぶん|au pay/i, "#eb5505", "au"],
+  [/d払い|dカード|docomo|ドコモ/i, "#cc0033", "d"], [/suica|モバイルpasmo|pasmo/i, "#2e9b3a", "交"], [/amazon/i, "#ff9900", "a"]];
+const KIND_COLOR = { bank: "#2a78d6", cash: "#a07b3b", emoney: "#eda100", card: "#6250d6", securities: "#eb6834", nisa: "#eb6834", ideco: "#1baf7a", dc: "#1baf7a", loan: "#77766f", other: "#e87ba4" };
+function brandOf(a) {
+  const txt = `${a?.name || ""} ${a?.institution || ""}`;
+  for (const [re, c, l] of BRANDS) if (re.test(txt)) return { c, l };
+  return { c: KIND_COLOR[a?.kind] || "#77766f", l: a?.kind === "cash" ? "¥" : (a?.name || "?").replace(/[（(].*$/, "").trim().charAt(0) };
+}
+const inkFor = (hex) => { const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; return 0.299 * r + 0.587 * g + 0.114 * b > 170 ? "#1a1a19" : "#ffffff"; };
+const avatar = (a) => { const { c, l } = brandOf(a); return `<span class="avatar" style="background:${c};color:${inkFor(c)}" aria-hidden="true">${esc(l)}</span>`; };
+const accDot = (a) => (a ? `<span class="acc-dot" style="background:${brandOf(a).c}"></span>${esc(a.institution && a.institution.length <= 8 ? a.institution : a.name)}` : "");
+// カテゴリは色が「そのカテゴリ」に付く（順位では変えない）。8 色を超える分はグレー
+const CAT_SLOT = { 交通: 1, 外食: 2, 食費: 3, コンビニ: 4, "衣服・美容": 5, 日用品: 6, "趣味・娯楽": 7, ネットショッピング: 8 };
+const catColor = (c) => (CAT_SLOT[c] ? `var(--series-${CAT_SLOT[c]})` : "var(--series-other)");
+const catIcon = (c) => `<span class="cat-ico" style="--c:${catColor(c)}" aria-hidden="true">${CAT_EMOJI[c] || "•"}</span>`;
+
 // ------------------------------------------------------------------ アイコン・グラフの部品
 const ICON_PATHS = {
   wallet: '<path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3h-4a2 2 0 0 0 0 4h4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/>',
@@ -1112,7 +1133,7 @@ function ring(ratio, status) {
     <circle class="val" cx="38" cy="38" r="${r}" fill="none" stroke-width="8" stroke-linecap="round" stroke-dasharray="${c * v} ${c}" transform="rotate(-90 38 38)"/>
     <text x="38" y="35" text-anchor="middle" class="face">${STATUS_FACE[status] || ""}</text><text x="38" y="53" text-anchor="middle">${Math.round(v * 100)}%</text></svg>`;
 }
-function donut(slices, total) {
+function donut(slices, total, c1 = "総資産") {
   const R = 80, r = 54, cx = 85, cy = 85;
   let a0 = -Math.PI / 2, out = "";
   const sum = slices.reduce((s, x) => s + x.value, 0) || 1;
@@ -1122,7 +1143,7 @@ function donut(slices, total) {
     out += `<path d="M${p(R, a0)} A${R},${R} 0 ${large} 1 ${p(R, a1)} L${p(r, a1)} A${r},${r} 0 ${large} 0 ${p(r, a0)} Z" fill="var(${sl.color})" data-tip="${esc(sl.tip)}" data-sw="${sl.color}"/>`;
     a0 = a1;
   }
-  return `<svg class="donut" viewBox="0 0 170 170" role="img" aria-label="総資産 ${yen(total)} の内訳">${out}<text class="c1" x="85" y="80" text-anchor="middle">総資産</text><text class="c2" x="85" y="100" text-anchor="middle">${man(total)}</text></svg>`;
+  return `<svg class="donut" viewBox="0 0 170 170" role="img" aria-label="総資産 ${yen(total)} の内訳">${out}<text class="c1" x="85" y="78" text-anchor="middle">${c1}</text><text class="c2" x="85" y="100" text-anchor="middle">${total >= 100000 ? man(total) : yen(total)}</text></svg>`;
 }
 const ASSET_GROUPS = [["deposit", "預金・現金", "--series-1", ["bank", "cash"]], ["invest", "投資（NISA・特定口座）", "--series-2", ["securities", "nisa"]],
   ["pension", "年金（iDeCo・企業型DC）", "--series-3", ["ideco", "dc"]], ["emoney", "電子マネー", "--series-4", ["emoney"]], ["other", "ポイント・その他", "--series-5", ["other"]]];
@@ -1137,9 +1158,25 @@ function renderAssets(d, w) {
   const p = (v) => `${((v / total) * 100).toFixed(v / total < 0.1 ? 1 : 0)}%`;
   return `<div class="donut-wrap">${donut(groups.map((g) => ({ value: g.value, color: g.color, tip: `${g.label}|${yen(g.value)}（${p(g.value)}）` })), total)}
     <div class="asset-groups">${groups.map((g) => `<div class="asset-group"><div class="head"><span class="sw" style="background:var(${g.color})"></span><span>${esc(g.label)}<span class="p">${p(g.value)}</span>${g.k === "pension" ? '<span class="tag locked">60歳まで引出不可</span>' : ""}</span><span>${yen(g.value)}</span></div>
-      ${g.items.map((a) => `<div class="acc"><span aria-hidden="true">${KIND_EMOJI[a.kind] || "•"}</span><span>${esc(a.name)}</span><span>${yen(a.balance)}</span></div>`).join("")}</div>`).join("")}
+      ${g.items.map((a) => `<div class="acc">${avatar(a)}<span>${esc(a.name)}</span><span>${yen(a.balance)}</span></div>`).join("")}</div>`).join("")}
       <div class="asset-total"><span>総資産</span><span>${yen(total)}</span><span class="muted">カード未払い・ローン</span><span class="neg">−${yen(w.liability)}</span><span class="big">純資産</span><span class="big">${yen(total - w.liability)}</span></div></div></div>`;
 }
+
+// 右下の ＋ ボタンと入力シート（明細・口座・固定費・ほしいもの）
+const SHEET_FOR_TAB = { dashboard: "sheet-tx", transactions: "sheet-tx", assets: "sheet-acc", recurring: "sheet-rec", wishlist: "sheet-wish" };
+function openSheet(id, fresh) {
+  const d = $("#" + id), f = d?.querySelector("form");
+  if (!d) return;
+  if (fresh && f) { f.reset(); const idf = f.elements.namedItem("id"); if (idf) idf.value = ""; f.dispatchEvent(new Event("change")); }
+  fillIcons();
+  if (!d.open) d.showModal();
+}
+$("#fab").addEventListener("click", () => openSheet(SHEET_FOR_TAB[currentTab] || "sheet-tx", true));
+document.addEventListener("click", (e) => { const o = e.target.closest?.("[data-open]"); if (o) { e.preventDefault(); openSheet(o.dataset.open, true); } });
+$$("dialog.form-sheet").forEach((d) => {
+  d.addEventListener("click", (e) => { if (e.target.closest("[data-close]") || e.target === d) d.close(); });
+  d.querySelector("form")?.addEventListener("reset", () => d.close());
+});
 
 // 純資産のカードを押すと総資産の内訳をポップアップで出す
 let lastAssets = "";
@@ -1188,18 +1225,19 @@ function renderDashboard() {
   $("#alerts").innerHTML = alerts.map(([k, m]) => `<div class="alert ${k}"><span class="icon">${k ? "!" : "⚠"}</span><div>${m}</div></div>`).join("");
 
   const cats = b.categories.filter((c) => c.spent > 0 || c.budget);
-  const maxCat = Math.max(1, ...cats.map((c) => Math.max(c.spent, c.budget || 0)));
-  $("#cat-chart").innerHTML = cats.length ? `<div class="bars">${cats.map((c) => `
-    <div class="bar-row" data-tip="${esc(c.category)}|使った ${yen(c.spent)}${c.budget ? `|予算 ${yen(c.budget)}（${pct(c.ratio)}）|残り ${yen(c.remaining)}` : ""}">
-      <span class="name"><span class="emo" aria-hidden="true">${CAT_EMOJI[c.category] || "•"}</span>${esc(c.category)}</span>
-      <div class="bar-track"><div class="fill ${c.budget && c.spent > c.budget ? "over" : ""}" style="width:${(c.spent / maxCat) * 100}%"></div>${c.budget ? `<div class="budget-line" style="left:calc(${(c.budget / maxCat) * 100}% - 1px)"></div>` : ""}</div>
-      <span class="amt">${yen(c.spent)}${c.budget ? ` <span class="muted">/ ${man(c.budget)}</span>` : `<span class="pct">${pct(c.spent / Math.max(1, cats.reduce((s, x) => s + x.spent, 0)))}</span>`}</span></div>`).join("")}</div>
-`
-    : `<p class="muted">今期の支出はまだありません。<a href="#" data-goto="transactions">明細</a>でカードの CSV を取り込むか、支出を記録してください。</p>`;
+  const gross = cats.reduce((x, c) => x + c.spent, 0);
+  const slices = []; let other = 0;
+  for (const c of cats) if (c.spent > 0) { if (CAT_SLOT[c.category]) slices.push({ value: c.spent, color: catColor(c.category).slice(4, -1), tip: `${c.category}|${yen(c.spent)}（${pct(c.spent / gross)}）` }); else other += c.spent; }
+  if (other) slices.push({ value: other, color: "--series-other", tip: `その他のカテゴリ|${yen(other)}（${pct(other / gross)}）` });
+  $("#cat-chart").innerHTML = gross > 0 ? `<div class="donut-wrap spend">${donut(slices, b.spent, "使った")}
+    <div class="cat-list">${cats.filter((c) => c.spent > 0).map((c) => `<div class="cat-row" data-tip="${esc(c.category)}|${yen(c.spent)}（${pct(c.spent / gross)}）">${catIcon(c.category)}
+      <span class="nm">${esc(c.category)}</span><span class="bar"><span style="width:${(c.spent / cats[0].spent) * 100}%;background:${catColor(c.category)}"></span></span><span class="amt">${yen(c.spent)}</span><span class="pct">${pct(c.spent / gross)}</span></div>`).join("")}
+      ${b.reimbursed ? `<div class="cat-row muted small"><span></span><span class="nm">立替の精算（受け取り）</span><span></span><span class="amt">−${yen(b.reimbursed)}</span><span></span></div>` : ""}</div></div>`
+    : `<p class="muted">今期の支出はまだありません。右下の ＋ から記録するか、カードの CSV を取り込んでください。</p>`;
 
   $("#cards-list").innerHTML = d.cards.length ? `<div class="list">${d.cards.map((c) => `
-    <div class="item"><div><div class="title">${esc(c.institution || c.name)}</div>
-      <div class="meta">今の利用分 ${yen(c.current_cycle.amount)}（${md(c.current_cycle.end)}締め）</div></div>
+    <div class="item"><div class="with-av">${avatar(c)}<div><div class="title">${esc(c.institution || c.name)}</div>
+      <div class="meta">今の利用分 ${yen(c.current_cycle.amount)}（${md(c.current_cycle.end)}締め）</div></div></div>
       <div class="right"><div>${md(c.next_payment.date)} 引き落とし</div>
       <div class="title">${yen(c.next_payment.amount)}${c.next_payment.source === "email" ? '<span class="tag">メールで確定</span>' : c.next_payment.confirmed ? '<span class="tag">明細から推定</span>' : '<span class="tag">利用中</span>'}</div>
       ${c.next_payment.source === "email" && c.next_payment.amount - c.next_payment.tracked_amount > 1000 ? `<div class="meta">取り込んだ明細より ${yen(c.next_payment.amount - c.next_payment.tracked_amount)} 多い</div>` : ""}
@@ -1300,12 +1338,19 @@ function renderTxTable() {
   const recName = (id) => recurring().find((r) => r.id === id)?.name || "";
   const exp = rows.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
   const inc = rows.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  $("#tx-total").textContent = `${rows.length} 件／支出 ${yen(exp)}／収入 ${yen(inc)}`;
-  $("#tx-table").innerHTML = rows.length ? `<thead><tr><th>日付</th><th>内容</th><th>カテゴリ</th><th>口座</th><th class="num">金額</th><th></th></tr></thead><tbody>` +
-    rows.map((t) => `<tr><td>${md(t.date)}</td><td class="desc">${esc(t.description)}${t.source === "gmail" ? '<span class="tag">メール</span>' : t.source === "receipt" ? '<span class="tag">購入メール</span>' : ""}${t.recurring_id ? `<span class="tag">固定費: ${esc(recName(t.recurring_id))}</span>` : ""}${t.own_share != null && t.own_share < t.amount ? `<span class="tag">立替 自分の分 ${yen(t.own_share)}</span>` : ""}${t.memo ? `<div class="muted small">${esc(t.memo)}</div>` : ""}</td>
-      <td>${esc(t.category)}</td><td>${esc(accName(t.account_id))}</td><td class="num">${t.type === "income" ? "+" : t.type === "transfer" ? "⇄ " : "−"}${yen(t.amount)}</td>
-      <td><button class="link-btn" data-edit-tx="${esc(t.id)}" type="button">編集</button><button class="link-btn danger" data-del-tx="${esc(t.id)}" type="button">${pendingDelete === t.id ? "本当に削除" : "削除"}</button></td></tr>`).join("") + "</tbody>"
-    : `<tbody><tr><td class="muted">この月の明細はありません。上のフォームで記録するか、カードの CSV を取り込んでください。</td></tr></tbody>`;
+  $("#tx-total").innerHTML = `<span>${rows.length} 件</span><span class="neg-ink">支出 ${yen(exp)}</span><span class="pos-ink">収入 ${yen(inc)}</span>`;
+  const byDay = {};
+  for (const t of rows) (byDay[t.date] ||= []).push(t);
+  const WD = "月火水木金土日";
+  $("#tx-table").innerHTML = rows.length ? Object.entries(byDay).map(([d, ts]) => `<div class="day-head">${md(d)}（${WD[D.weekday(D.parse(d))]}）</div>
+    <div class="tx-list">${ts.map((t) => { const a = accounts().find((x) => x.id === t.account_id) || S.accounts.items.find((x) => x.id === t.account_id);
+      return `<div class="tx-row">${t.type === "transfer" ? '<span class="cat-ico" style="--c:var(--muted)" aria-hidden="true">⇄</span>' : t.type === "income" ? '<span class="cat-ico" style="--c:var(--good)" aria-hidden="true">💰</span>' : catIcon(t.category)}
+      <div class="tx-main"><div class="tx-desc">${esc(t.description)}</div>
+        <div class="tx-meta">${esc(t.category)}${a ? `<span class="sep">·</span>${accDot(a)}` : ""}${t.recurring_id ? `<span class="tag">固定費</span>` : ""}${t.own_share != null && t.own_share < t.amount ? `<span class="tag">自分の分 ${yen(t.own_share)}</span>` : ""}${t.source === "gmail" ? '<span class="tag">メール</span>' : ""}</div>
+        ${t.memo ? `<div class="tx-memo">${esc(t.memo)}</div>` : ""}</div>
+      <div class="tx-amt ${t.type}">${t.type === "income" ? "+" : t.type === "transfer" ? "" : "−"}${yen(t.amount)}
+        <div class="tx-act"><button class="link-btn" data-edit-tx="${esc(t.id)}" type="button">編集</button><button class="link-btn danger" data-del-tx="${esc(t.id)}" type="button">${pendingDelete === t.id ? "本当に削除" : "削除"}</button></div></div></div>`; }).join("")}</div>`).join("")
+    : `<p class="muted">この月の明細はありません。右下の ＋ から記録するか、カードの CSV を取り込んでください。</p>`;
 }
 
 // confirm() が使えないので、削除はボタンを 2 回押して確定する
@@ -1506,8 +1551,8 @@ function renderAccounts() {
   const groups = {};
   for (const a of accounts()) (groups[a.kind] ||= []).push(a);
   $("#account-list").innerHTML = Object.keys(KIND_LABELS).filter((k) => groups[k]).map((k) => `<h3>${KIND_LABELS[k]}</h3><div class="list">${groups[k].map((a) => `
-    <div class="item"><div><div class="title">${esc(a.name)}${PENSION.has(a.kind) ? '<span class="tag locked">60歳まで引出不可</span>' : ""}</div>
-      <div class="meta">${esc(a.institution || "")}${a.kind === "card" ? `　${a.closing_day === 31 ? "月末" : a.closing_day + "日"}締め・翌月${a.payment_day}日払い` : a.updated_at ? `　更新 ${esc(a.updated_at)}` : "　残高未入力"}</div></div>
+    <div class="item"><div class="with-av">${avatar(a)}<div><div class="title">${esc(a.name)}${PENSION.has(a.kind) ? '<span class="tag locked">60歳まで引出不可</span>' : ""}</div>
+      <div class="meta">${esc(a.institution || "")}${a.kind === "card" ? `　${a.closing_day === 31 ? "月末" : a.closing_day + "日"}締め・翌月${a.payment_day}日払い` : a.updated_at ? `　更新 ${esc(a.updated_at)}` : "　残高未入力"}</div></div></div>
       <div class="right">${a.kind === "card" ? (a.card_limit ? `枠 ${yen(a.card_limit)}` : "") : `<div class="title">${a.kind === "loan" ? "−" : ""}${yen(a.balance)}</div>${a.contributed != null ? `<div class="meta">元本 ${yen(a.contributed)}</div>` : ""}`}
         <div><button class="link-btn" data-edit-acc="${esc(a.id)}" type="button">編集</button><button class="link-btn danger" data-del-acc="${esc(a.id)}" type="button">${pendingDelete === a.id ? "本当に削除" : "削除"}</button></div></div></div>`).join("")}</div>`).join("")
     || `<p class="muted">まだ登録がありません。銀行口座・カード・NISA・iDeCo などを登録しましょう。</p>`;
