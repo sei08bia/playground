@@ -4,7 +4,9 @@
 """
 from __future__ import annotations
 
+import os
 from collections import Counter
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 from typing import Literal, Optional
@@ -14,10 +16,21 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import advisor, csv_import, db, service
+from . import advisor, csv_import, db, gmail_sync, mail_parser, service
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
-app = FastAPI(title="お金の見える化")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # GMAIL_ADDRESS / GMAIL_APP_PASSWORD があれば裏で定期的にメールを取り込む
+    stop = None if os.environ.get("MONEY_DISABLE_SCHEDULER") else gmail_sync.start_scheduler()
+    yield
+    if stop:
+        stop.set()
+
+
+app = FastAPI(title="お金の見える化", lifespan=lifespan)
 
 AccountKind = Literal["bank", "cash", "emoney", "card", "securities", "nisa", "ideco", "dc", "loan", "other"]
 
@@ -32,6 +45,7 @@ class AccountIn(BaseModel):
     payment_day: Optional[int] = Field(None, ge=1, le=31)
     payment_account_id: Optional[int] = None
     card_limit: Optional[int] = None
+    email_keyword: str = ""
     note: str = ""
 
 
@@ -242,7 +256,7 @@ async def import_csv(file: UploadFile = File(...), account_id: Optional[int] = F
     items = csv_import.parse_csv(data)
     if not items:
         raise HTTPException(400, "明細を読み取れませんでした。日付・金額・内容の列がある CSV か確認してください。")
-    inserted = skipped = 0
+    inserted = skipped = merged = 0
     seen: Counter = Counter()
     with db.session() as conn:
         for it in items:
@@ -252,6 +266,19 @@ async def import_csv(file: UploadFile = File(...), account_id: Optional[int] = F
             if conn.execute("SELECT 1 FROM transactions WHERE import_hash = ?", (h,)).fetchone():
                 skipped += 1
                 continue
+            # Gmail の利用通知で先に取り込んだ同じ利用があれば、CSV の内容で置き換える
+            dup = next(iter(db.rows(conn, """
+                SELECT * FROM transactions WHERE source = 'gmail' AND amount = ? AND type = ? AND account_id IS ?
+                  AND abs(julianday(date) - julianday(?)) <= 3
+                ORDER BY abs(julianday(date) - julianday(?)) LIMIT 1""",
+                (it["amount"], it["type"], account_id, it["date"], it["date"]))), None)
+            if dup:
+                merged += 1
+                if not dry_run:
+                    conn.execute("UPDATE transactions SET date = ?, description = ?, category = CASE WHEN category = '未分類' "
+                                 "THEN ? ELSE category END, source = 'csv', import_hash = ? WHERE id = ?",
+                                 (it["date"], it["description"], it["category"], h, dup["id"]))
+                continue
             rec_id = service.match_recurring(conn, it["description"]) if it["type"] == "expense" else None
             if not dry_run:
                 _insert(conn, "transactions", {**it, "account_id": account_id, "recurring_id": rec_id,
@@ -259,8 +286,58 @@ async def import_csv(file: UploadFile = File(...), account_id: Optional[int] = F
             inserted += 1
         if dry_run:
             conn.rollback()
-    return {"parsed": len(items), "inserted": inserted, "skipped_duplicates": skipped,
+    return {"parsed": len(items), "inserted": inserted, "skipped_duplicates": skipped, "merged_with_gmail": merged,
             "preview": items[:10], "dry_run": dry_run}
+
+
+# ------------------------------------------------------------------ Gmail 取り込み
+
+class ParseTestIn(BaseModel):
+    sender: str
+    subject: str
+    body: str
+
+
+@app.get("/api/gmail/status")
+def gmail_status():
+    with db.session() as conn:
+        return service.gmail_status(conn)
+
+
+@app.post("/api/gmail/sync")
+def gmail_sync_now():
+    try:
+        return gmail_sync.sync()
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/gmail/log")
+def gmail_log(limit: int = 50):
+    with db.session() as conn:
+        return db.rows(conn, "SELECT * FROM email_imports ORDER BY COALESCE(received_at, created_at) DESC, id DESC LIMIT ?",
+                       (min(limit, 500),))
+
+
+@app.post("/api/gmail/import-eml")
+async def gmail_import_eml(files: list[UploadFile] = File(...)):
+    return gmail_sync.import_raw([await f.read() for f in files])
+
+
+@app.post("/api/gmail/parse-test")
+def gmail_parse_test(body: ParseTestIn):
+    p = mail_parser.parse_mail(body.sender, body.subject, body.body)
+    with db.session() as conn:
+        account_id = gmail_sync.match_card(conn, p) if p.kind != "ignored" else None
+        account = conn.execute("SELECT name FROM accounts WHERE id = ?", (account_id,)).fetchone() if account_id else None
+    return {**p.__dict__, "account": account["name"] if account else None}
+
+
+@app.get("/api/card-bills")
+def card_bills():
+    with db.session() as conn:
+        return db.rows(conn, "SELECT b.*, a.name AS account FROM card_bills b JOIN accounts a ON a.id = b.account_id "
+                             "ORDER BY payment_date DESC LIMIT 36")
 
 
 # ------------------------------------------------------------------ 固定費・サブスク

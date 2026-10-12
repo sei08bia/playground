@@ -182,7 +182,8 @@ async function loadDashboard() {
   $("#cards-list").innerHTML = d.cards.length ? `<div class="list">${d.cards.map((c) => `
     <div class="item"><div><div class="title">${esc(c.name)}</div>
       <div class="meta">${c.closing_day === 31 ? "月末" : c.closing_day + "日"}締め・翌月${c.payment_day}日払い／今の利用期間 ${md(c.current_cycle.start)}〜${md(c.current_cycle.end)}: ${yen(c.current_cycle.amount)}</div></div>
-      <div class="right"><div>${md(c.next_payment.date)} 引き落とし</div><div class="title">${yen(c.next_payment.amount)}${c.next_payment.confirmed ? "" : '<span class="tag">利用中</span>'}</div>
+      <div class="right"><div>${md(c.next_payment.date)} 引き落とし</div><div class="title">${yen(c.next_payment.amount)}${c.next_payment.source === "email" ? '<span class="tag">メールで確定</span>' : c.next_payment.confirmed ? "" : '<span class="tag">利用中</span>'}</div>
+      ${c.next_payment.source === "email" && c.next_payment.amount - c.next_payment.tracked_amount > 1000 ? `<div class="meta">取り込んだ明細より ${yen(c.next_payment.amount - c.next_payment.tracked_amount)} 多い</div>` : ""}
       ${c.limit ? `<div class="meta">枠 ${pct(c.limit_usage)} 使用</div>` : ""}</div></div>`).join("")}</div>`
     : `<p class="muted">カードが未登録です。<a href="#" data-goto="assets">登録する</a></p>`;
 
@@ -302,6 +303,7 @@ async function loadTransactions() {
   if ($("#tx-account").value) params.set("account_id", $("#tx-account").value);
   txCache = await api(`/api/transactions?${params}`);
   renderTxTable();
+  loadGmail();
 }
 
 function renderTxTable() {
@@ -313,7 +315,7 @@ function renderTxTable() {
   const inc = rows.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   $("#tx-total").textContent = `${rows.length} 件／支出 ${yen(exp)}／収入 ${yen(inc)}`;
   $("#tx-table").innerHTML = `<thead><tr><th>日付</th><th>内容</th><th>カテゴリ</th><th>口座</th><th class="num">金額</th><th></th></tr></thead><tbody>` +
-    rows.map((t) => `<tr><td>${md(t.date)}</td><td class="desc">${esc(t.description)}${t.recurring_id ? `<span class="tag">固定費: ${esc(recName(t.recurring_id))}</span>` : ""}${t.memo ? `<div class="meta muted small">${esc(t.memo)}</div>` : ""}</td>
+    rows.map((t) => `<tr><td>${md(t.date)}</td><td class="desc">${esc(t.description)}${t.source === "gmail" ? '<span class="tag">メール</span>' : ""}${t.recurring_id ? `<span class="tag">固定費: ${esc(recName(t.recurring_id))}</span>` : ""}${t.memo ? `<div class="meta muted small">${esc(t.memo)}</div>` : ""}</td>
       <td>${esc(t.category)}</td><td>${esc(accName(t.account_id))}</td>
       <td class="num ${t.type === "income" ? "" : ""}">${t.type === "income" ? "+" : t.type === "transfer" ? "⇄ " : "−"}${yen(t.amount)}</td>
       <td><button class="link-btn" data-edit-tx="${t.id}">編集</button><button class="link-btn danger" data-del-tx="${t.id}">削除</button></td></tr>`).join("") + "</tbody>";
@@ -361,7 +363,7 @@ async function uploadCsv(dryRun) {
   fd.append("dry_run", dryRun ? "true" : "false");
   try {
     const r = await api("/api/import/csv", { method: "POST", body: fd });
-    $("#csv-result").innerHTML = `<p>${r.parsed} 件を読み取り、${dryRun ? "取り込み対象" : "取り込み"} ${r.inserted} 件／重複スキップ ${r.skipped_duplicates} 件</p>
+    $("#csv-result").innerHTML = `<p>${r.parsed} 件を読み取り、${dryRun ? "取り込み対象" : "取り込み"} ${r.inserted} 件／重複スキップ ${r.skipped_duplicates} 件${r.merged_with_gmail ? `／メールで取り込み済みの明細と統合 ${r.merged_with_gmail} 件` : ""}</p>
       <div class="table-wrap"><table><tbody>${r.preview.map((p) => `<tr><td>${p.date}</td><td class="desc">${esc(p.description)}</td><td>${esc(p.category)}</td><td class="num">${p.type === "income" ? "+" : ""}${yen(p.amount)}</td></tr>`).join("")}</tbody></table></div>
       ${r.parsed > r.preview.length ? `<p class="small muted">先頭 ${r.preview.length} 件を表示</p>` : ""}`;
     if (!dryRun) { toast(`${r.inserted} 件取り込みました`); loadTransactions(); }
@@ -369,6 +371,61 @@ async function uploadCsv(dryRun) {
 }
 $("#csv-preview").addEventListener("click", () => uploadCsv(true));
 csvForm.addEventListener("submit", (e) => { e.preventDefault(); uploadCsv(false); });
+
+// ------------------------------------------------------------------ gmail
+const GMAIL_STATUS = { imported: "明細に追加", merged: "既存の明細と同じ", bill: "請求額を反映", no_account: "カード未登録", ignored: "対象外" };
+async function loadGmail() {
+  const [st, logRows] = await Promise.all([api("/api/gmail/status"), api("/api/gmail/log?limit=30")]);
+  const last = st.last_sync;
+  const sum = last?.summary;
+  $("#gmail-status").innerHTML = st.configured
+    ? `<p>接続先 <b>${esc(st.address)}</b>・${st.auto ? `${st.interval_min}分ごとに自動取り込み` : "自動取り込みはオフ"}</p>` +
+      (last ? `<p class="${last.ok ? "muted" : "neg"}">前回 ${esc(last.at.replace("T", " "))}：${last.ok
+        ? `メール ${sum.checked} 件を確認、明細 ${sum.imported} 件追加・請求額 ${sum.bills} 件反映${sum.merged ? `・重複 ${sum.merged} 件` : ""}${sum.no_account ? `・<b>カード未登録 ${sum.no_account} 件</b>` : ""}`
+        : esc(last.error)}</p>` : `<p class="muted">まだ取り込んでいません。</p>`)
+    : `<p class="neg">Gmail が未設定です。下の「設定方法」を見て <code>GMAIL_ADDRESS</code> と <code>GMAIL_APP_PASSWORD</code> を設定し、アプリを起動し直してください。</p>`;
+  $("#gmail-sync").disabled = !st.configured;
+  const f = $("#gmail-settings");
+  f.gmail_auto.checked = st.auto; f.gmail_interval_min.value = st.interval_min; f.gmail_lookback_days.value = st.lookback_days;
+  $("#gmail-log").innerHTML = logRows.length ? `<thead><tr><th>受信</th><th>件名</th><th>結果</th></tr></thead><tbody>` +
+    logRows.map((r) => `<tr><td>${esc((r.received_at || r.created_at || "").slice(0, 10))}</td><td class="desc">${esc(r.subject)}<div class="muted small">${esc(r.sender)}</div></td>
+      <td class="desc"><span class="st-${r.status}">${GMAIL_STATUS[r.status] || r.status}</span>${r.detail ? `<div class="muted small">${esc(r.detail)}</div>` : ""}</td></tr>`).join("") + "</tbody>"
+    : `<tbody><tr><td class="muted">履歴はまだありません。</td></tr></tbody>`;
+}
+$("#gmail-sync").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  try {
+    const r = await api("/api/gmail/sync", { method: "POST" });
+    toast(`明細 ${r.summary.imported} 件・請求額 ${r.summary.bills} 件を取り込みました`);
+    loadTransactions();
+  } catch (err) { toast(err.message); loadGmail(); }
+  finally { e.target.disabled = false; }
+});
+$("#gmail-settings").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  await api("/api/settings", { method: "PUT", json: { gmail_auto: f.gmail_auto.checked,
+    gmail_interval_min: Math.max(5, Number(f.gmail_interval_min.value || 30)), gmail_lookback_days: Math.max(1, Number(f.gmail_lookback_days.value || 45)) } });
+  toast("保存しました"); loadGmail();
+});
+$("#eml-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData();
+  for (const file of e.target.files.files) fd.append("files", file);
+  if (!fd.has("files")) { toast("ファイルを選んでください"); return; }
+  try {
+    const r = await api("/api/gmail/import-eml", { method: "POST", body: fd });
+    toast(`メール ${r.checked} 件：明細 ${r.imported} 件・請求額 ${r.bills} 件`); loadTransactions();
+  } catch (err) { toast(err.message); }
+});
+$("#parse-test-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const r = await api("/api/gmail/parse-test", { method: "POST", json: formData(e.target) });
+  const lines = r.kind === "transaction" ? [`明細: ${r.date} ${r.description} ${yen(r.amount)}${r.refund ? "（取消・返金）" : ""}`]
+    : r.kind === "bill" ? [`請求額: ${yen(r.amount)}（${r.payment_date} 払い${r.confirmed ? "・確定" : "・予定"}）`] : [`対象外: ${r.reason}`];
+  if (r.kind !== "ignored") lines.push(`カード会社: ${r.issuer}${r.card_label ? `（${r.card_label}）` : ""} → 口座: ${r.account || "見つかりません（カードを登録してください）"}`);
+  $("#parse-test-out").textContent = lines.join("\n");
+});
 
 // ------------------------------------------------------------------ accounts
 const accForm = $("#account-form");

@@ -88,7 +88,7 @@ def test_card_cycle_month_end_closing():
            tx("2026-10-01", 3000, account_id=7), tx("2026-10-12", 1000, account_id=7),
            tx("2026-10-05", 999, account_id=8)]
     s = finance.card_status(card, txs, date(2026, 10, 12))
-    assert s["next_payment"] == {"date": "2026-10-27", "amount": 25000, "confirmed": True}
+    assert s["next_payment"] == {"date": "2026-10-27", "amount": 25000, "confirmed": True, "source": "estimate"}
     assert s["current_cycle"]["amount"] == 4000
     assert s["unpaid_total"] == 29000
     assert s["limit_usage"] == 0.29
@@ -100,8 +100,22 @@ def test_card_cycle_after_payment_day():
     txs = [tx("2026-09-10", 8000, account_id=1), tx("2026-09-20", 2000, account_id=1)]
     s = finance.card_status(card, txs, date(2026, 10, 12))
     assert s["current_cycle"]["start"] == "2026-09-16"
-    assert s["next_payment"] == {"date": "2026-11-10", "amount": 2000, "confirmed": False}
+    assert s["next_payment"] == {"date": "2026-11-10", "amount": 2000, "confirmed": False, "source": "estimate"}
     assert s["unpaid_total"] == 2000
+
+
+def test_card_uses_emailed_bill_even_when_payment_day_shifts():
+    # 27日払いが休日で 28日に。今日 10/27 でもまだ未払いとして扱い、明細より請求額を優先
+    card = {"id": 7, "name": "楽天", "closing_day": 31, "payment_day": 27}
+    txs = [tx("2026-09-10", 20000, account_id=7), tx("2026-10-02", 3000, account_id=7)]
+    bills = [{"payment_date": "2026-09-28", "amount": 99999, "confirmed": 1},   # 先月分（支払済み）
+             {"payment_date": "2026-10-28", "amount": 150000, "confirmed": 1}]
+    s = finance.card_status(card, txs, date(2026, 10, 27), bills)
+    assert s["next_payment"]["amount"] == 150000
+    assert s["next_payment"]["date"] == "2026-10-28"
+    assert s["next_payment"]["source"] == "email"
+    assert s["next_payment"]["tracked_amount"] == 20000
+    assert s["unpaid_total"] == 150000 + 3000
 
 
 def test_net_worth_separates_locked_pension():

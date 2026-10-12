@@ -260,7 +260,9 @@ def payment_date_for(cycle_end: date, payment_day: int) -> date:
     return clamp_day(y, m, payment_day)
 
 
-def card_status(card: dict, transactions: list[dict], today: date) -> dict[str, Any]:
+def card_status(card: dict, transactions: list[dict], today: date,
+                bills: list[dict] | None = None) -> dict[str, Any]:
+    """bills: メールで届いた確定請求額 [{payment_date, amount, confirmed}]。あれば明細からの推定より優先。"""
     closing = int(card.get("closing_day") or 31)
     pay_day = int(card.get("payment_day") or 27)
     cycles = card_cycles(today, closing)
@@ -275,11 +277,19 @@ def card_status(card: dict, transactions: list[dict], today: date) -> dict[str, 
     closed_pay = payment_date_for(cycles["last_closed"][1], pay_day)
     current_pay = payment_date_for(cycles["current"][1], pay_day)
 
-    if closed_pay >= today:
-        next_payment = {"date": closed_pay.isoformat(), "amount": closed_amount, "confirmed": True}
+    # 支払日が土日祝でずれるので、直近の締め分の支払日 ±7 日にある請求を同じ請求とみなす
+    bill = next((b for b in sorted(bills or [], key=lambda b: b["payment_date"])
+                 if parse_date(b["payment_date"]) >= today
+                 and abs((parse_date(b["payment_date"]) - closed_pay).days) <= 7), None)
+    if bill:
+        next_payment = {"date": bill["payment_date"], "amount": int(bill["amount"]), "confirmed": bool(bill.get("confirmed", 1)),
+                        "source": "email", "tracked_amount": closed_amount}
+        unpaid = int(bill["amount"]) + current_amount
+    elif closed_pay >= today:
+        next_payment = {"date": closed_pay.isoformat(), "amount": closed_amount, "confirmed": True, "source": "estimate"}
         unpaid = closed_amount + current_amount
     else:
-        next_payment = {"date": current_pay.isoformat(), "amount": current_amount, "confirmed": False}
+        next_payment = {"date": current_pay.isoformat(), "amount": current_amount, "confirmed": False, "source": "estimate"}
         unpaid = current_amount
     limit = card.get("card_limit")
     return {

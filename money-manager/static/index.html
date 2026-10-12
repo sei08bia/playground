@@ -81,6 +81,45 @@
         <div id="csv-result"></div>
       </form>
     </div>
+    <div class="card" id="gmail-card">
+      <div class="row-between wrap">
+        <h2>Gmail から自動取り込み</h2>
+        <button class="primary" id="gmail-sync">今すぐ取り込む</button>
+      </div>
+      <div id="gmail-status" class="small"></div>
+      <form id="gmail-settings" class="gmail-settings">
+        <label class="check"><input type="checkbox" name="gmail_auto"> 自動で取り込む</label>
+        <label>間隔（分）<input type="number" name="gmail_interval_min" min="5" max="1440"></label>
+        <label>さかのぼる日数<input type="number" name="gmail_lookback_days" min="1" max="365"></label>
+        <button type="submit">保存</button>
+      </form>
+      <details class="small">
+        <summary>設定方法・対応しているメール</summary>
+        <ol>
+          <li>Google アカウントで 2 段階認証をオンにし、<a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">アプリ パスワード</a>を作成</li>
+          <li>アプリを起動する前に <code>GMAIL_ADDRESS</code> と <code>GMAIL_APP_PASSWORD</code> を環境変数に設定（README 参照）</li>
+          <li>「口座・資産」でカードを登録（カード会社名を金融機関に入れておけば自動で紐づきます）</li>
+        </ol>
+        <p>読み取り専用で接続し、メールを既読にはしません。取り込むのはカード会社から届いたメールだけです。</p>
+        <ul>
+          <li><b>ご請求金額のご案内</b>（楽天カードなど）→ カードの次回引き落とし額を確定額で表示</li>
+          <li><b>ご利用のお知らせ</b>（三井住友・JCB・エポス・PayPayカードなど、1 回ごとの利用通知）→ 明細として取り込み。あとで同じ利用を CSV で取り込むと 1 件にまとまります</li>
+        </ul>
+      </details>
+      <details class="small">
+        <summary>.eml ファイルから取り込む／メール本文で解析テスト</summary>
+        <form id="eml-form" class="inline-form"><input type="file" name="files" accept=".eml,message/rfc822" multiple><button type="submit">取り込む</button></form>
+        <form id="parse-test-form" class="form">
+          <label>送信元<input name="sender" placeholder="info@mail.rakuten-card.co.jp"></label>
+          <label>件名<input name="subject" placeholder="ご利用のお知らせ"></label>
+          <label>本文<textarea name="body" rows="5"></textarea></label>
+          <div class="actions"><button type="submit">解析してみる</button></div>
+          <pre id="parse-test-out" class="small"></pre>
+        </form>
+      </details>
+      <h3>取り込み履歴</h3>
+      <div class="table-wrap"><table id="gmail-log"></table></div>
+    </div>
     <div class="card">
       <div class="row-between wrap">
         <h2>明細</h2>
@@ -117,6 +156,8 @@
         <label class="card-only">引き落とし日（翌月）<input type="number" name="payment_day" min="1" max="31" value="27"></label>
         <label class="card-only">引き落とし口座<select name="payment_account_id" class="bank-select"></select></label>
         <label class="card-only">利用枠（円）<input type="number" name="card_limit"></label>
+        <label class="card-only">メール照合キーワード<input name="email_keyword" placeholder="例: Mastercard（同じ会社のカードが複数あるとき）">
+          <span class="muted small">Gmail 取り込みで、メール中のカード名にこの文字が含まれたらこのカードとして扱います</span></label>
         <label>メモ<input name="note"></label>
         <div class="actions"><button class="primary" type="submit">保存</button><button type="reset">クリア</button></div>
         <p class="muted small">残高を更新するたびに履歴が残り、純資産の推移グラフになります。NISA・iDeCo は証券会社のサイトで評価額を見て月 1 回更新するのがおすすめです。</p>

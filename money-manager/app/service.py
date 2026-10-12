@@ -31,7 +31,9 @@ def dashboard(conn: sqlite3.Connection, today: date | None = None) -> dict[str, 
     wishlist = db.rows(conn, "SELECT * FROM wishlist ORDER BY priority, created_at")
 
     budget = finance.budget_summary(settings, recurring, transactions, today)
-    cards = [finance.card_status(a, transactions, today) for a in accounts if a["kind"] == "card"]
+    bills = db.rows(conn, "SELECT * FROM card_bills WHERE payment_date >= date(?, '-40 days')", (today.isoformat(),))
+    cards = [finance.card_status(a, transactions, today, [b for b in bills if b["account_id"] == a["id"]])
+             for a in accounts if a["kind"] == "card"]
     worth = finance.net_worth(accounts, cards)
     shortfalls = finance.payment_shortfalls(accounts, cards, recurring, today)
     wishes = finance.wishlist_analysis(wishlist, budget, worth, settings.get("emergency_fund_months", 6))
@@ -50,6 +52,7 @@ def dashboard(conn: sqlite3.Connection, today: date | None = None) -> dict[str, 
         "accounts": accounts,
         "recurring": recurring,
         "recent_transactions": transactions[:15],
+        "gmail": gmail_status(conn),
     }
 
 
@@ -88,3 +91,19 @@ def record_snapshot(conn: sqlite3.Connection, account_id: int, balance: int, con
         "INSERT INTO balance_snapshots(account_id, date, balance, contributed) VALUES (?, ?, ?, ?) "
         "ON CONFLICT(account_id, date) DO UPDATE SET balance = excluded.balance, contributed = excluded.contributed",
         (account_id, on.isoformat(), balance, contributed))
+
+
+def gmail_status(conn: sqlite3.Connection) -> dict[str, Any]:
+    from . import gmail_sync
+    settings = db.get_settings(conn)
+    creds = gmail_sync.credentials()
+    counts = {r["status"]: r["n"] for r in db.rows(conn, "SELECT status, COUNT(*) n FROM email_imports GROUP BY status")}
+    return {
+        "configured": bool(creds),
+        "address": (creds[0][:2] + "…@" + creds[0].split("@")[-1]) if creds else None,
+        "auto": bool(settings.get("gmail_auto")),
+        "interval_min": settings.get("gmail_interval_min"),
+        "lookback_days": settings.get("gmail_lookback_days"),
+        "last_sync": settings.get("gmail_last_sync"),
+        "counts": counts,
+    }

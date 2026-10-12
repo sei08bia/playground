@@ -124,6 +124,19 @@ def seed(conn, today: date | None = None) -> None:
                              "recurring_id, source) VALUES (?, ?, 'expense', (SELECT category FROM recurring WHERE id = ?), "
                              "?, ?, ?, 'demo')", (d.isoformat(), amount, recs[key], card, desc, recs[key]))
 
+    # Gmail から届いた（という想定の）確定請求額と取り込み履歴
+    pay = date(today.year, today.month, 27) if today.day <= 27 else date(today.year + (today.month == 12), today.month % 12 + 1, 27)
+    conn.execute("INSERT INTO card_bills(account_id, payment_date, amount, confirmed) VALUES (?, ?, 98500, 1)",
+                 (card1, pay.isoformat()))
+    conn.execute("UPDATE accounts SET email_keyword = 'Mastercard' WHERE id = ?", (card1,))
+    for i, (subject, status, detail) in enumerate((
+            ("【楽天カード】カードご請求金額のご案内", "bill", f"98,500円 {pay.isoformat()}払い（確定）"),
+            ("ご利用のお知らせ【三井住友カード】", "imported", ""),
+            ("楽天カードご利用で、いつものお買い物をもっとお得に！", "ignored", "利用通知ではありません"))):
+        conn.execute("INSERT INTO email_imports(message_id, received_at, sender, subject, status, detail) VALUES (?, ?, ?, ?, ?, ?)",
+                     (f"demo-{i}", (today - timedelta(days=i * 3)).isoformat(),
+                      "info@mail.rakuten-card.co.jp" if i != 1 else "info@vpass.ne.jp", subject, status, detail))
+
     for name, price, prio, saved, note in (("ワイヤレスイヤホン", 39800, 2, 10000, ""),
                                           ("ロードバイク", 180000, 3, 30000, "来年の春までに"),
                                           ("ふるさと納税（年内）", 60000, 1, 0, "12月までに")):
@@ -134,7 +147,7 @@ def seed(conn, today: date | None = None) -> None:
 def main() -> None:
     conn = db.connect()
     if "--reset" in sys.argv:
-        for t in ("transactions", "balance_snapshots", "recurring", "wishlist", "accounts", "advice_log", "settings"):
+        for t in ("email_imports", "card_bills", "transactions", "balance_snapshots", "recurring", "wishlist", "accounts", "advice_log", "settings"):
             conn.execute(f"DROP TABLE IF EXISTS {t}")
     db.init_db(conn)
     if conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]:

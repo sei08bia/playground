@@ -82,6 +82,30 @@ CREATE TABLE IF NOT EXISTS wishlist (
     created_at TEXT NOT NULL DEFAULT (date('now', 'localtime'))
 );
 
+-- メールで届いた確定請求額（カードの次回引き落とし額の推定より優先する）
+CREATE TABLE IF NOT EXISTS card_bills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    payment_date TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    confirmed INTEGER NOT NULL DEFAULT 1,
+    source TEXT NOT NULL DEFAULT 'gmail',
+    UNIQUE(account_id, payment_date)
+);
+
+-- 取り込んだメールの記録（二重取り込み防止と、読めなかったメールの確認用）
+CREATE TABLE IF NOT EXISTS email_imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT NOT NULL UNIQUE,
+    received_at TEXT,
+    sender TEXT,
+    subject TEXT,
+    status TEXT NOT NULL,          -- imported / merged / bill / ignored / no_account
+    detail TEXT DEFAULT '',
+    transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -102,7 +126,16 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "savings_goal": 0,            # 毎月の先取り貯金（積立投資は固定費の investment に登録）
     "category_budgets": {},       # {"食費": 40000, ...}
     "emergency_fund_months": 6,   # 生活防衛資金の目標（生活費の何か月分）
+    "gmail_auto": True,           # Gmail の認証情報があれば定期的に取り込む
+    "gmail_interval_min": 30,
+    "gmail_lookback_days": 45,
+    "gmail_last_sync": None,      # {"at": ..., "ok": bool, "summary": {...}, "error": ...}
 }
+
+# 既存 DB に後から足した列
+MIGRATIONS = [
+    ("accounts", "email_keyword", "TEXT DEFAULT ''"),   # メールのカード名と照合する文字列
+]
 
 
 def db_path() -> Path:
@@ -120,6 +153,10 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    for table, column, decl in MIGRATIONS:
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
     for key, value in DEFAULT_SETTINGS.items():
         conn.execute(
             "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",

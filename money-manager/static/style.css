@@ -216,3 +216,20 @@ td.desc { white-space: normal; min-width: 160px; }
   .bar-row { grid-template-columns: 80px 1fr auto; }
   .ask { grid-template-columns: 1fr; }
 }
+
+/* ---------- gmail ---------- */
+.gmail-settings { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 10px 0; font-size: 13px; color: var(--text-2); }
+.gmail-settings label { display: grid; gap: 4px; }
+.gmail-settings label.check { display: flex; align-items: center; gap: 6px; padding-bottom: 8px; }
+.gmail-settings input[type=number] { width: 110px; }
+.inline-form { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+details { margin: 8px 0; }
+details summary { cursor: pointer; color: var(--text-2); }
+details ol, details ul { padding-left: 1.4em; }
+code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+pre { white-space: pre-wrap; background: var(--surface-2); padding: 8px; border-radius: 8px; }
+pre:empty { display: none; }
+.st-imported, .st-bill { color: var(--good-ink); }
+.st-merged { color: var(--text-2); }
+.st-no_account { color: var(--warning-ink); }
+.st-ignored { color: var(--muted); }
