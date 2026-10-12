@@ -2,13 +2,13 @@
 <header class="topbar">
   <h1>お金の見える化</h1>
   <nav id="tabs">
-    <button data-tab="dashboard" class="active">ダッシュボード</button>
-    <button data-tab="transactions">明細</button>
-    <button data-tab="assets">口座・資産</button>
-    <button data-tab="recurring">固定費・サブスク</button>
-    <button data-tab="wishlist">ほしいもの</button>
-    <button data-tab="advice">AIアドバイス</button>
-    <button data-tab="settings">設定</button>
+    <button data-tab="dashboard" class="active"><span data-icon="home"></span>ダッシュボード</button>
+    <button data-tab="transactions"><span data-icon="list"></span>明細</button>
+    <button data-tab="assets"><span data-icon="bank"></span>口座・資産</button>
+    <button data-tab="recurring"><span data-icon="repeat"></span>固定費・サブスク</button>
+    <button data-tab="wishlist"><span data-icon="gift"></span>ほしいもの</button>
+    <button data-tab="advice"><span data-icon="sparkle"></span>AIアドバイス</button>
+    <button data-tab="settings"><span data-icon="gear"></span>設定</button>
   </nav>
 </header>
 
@@ -28,20 +28,20 @@
     <div class="card" id="todo-card"></div>
     <div id="alerts"></div>
     <div class="grid two">
-      <div class="card"><h2>カテゴリ別（今期・変動費）</h2><div id="cat-chart"></div></div>
-      <div class="card"><h2>カードの利用状況</h2><div id="cards-list"></div></div>
+      <div class="card"><h2><span data-icon="list"></span>カテゴリ別（今期・変動費）</h2><div id="cat-chart"></div></div>
+      <div class="card"><h2><span data-icon="card"></span>カードの利用状況</h2><div id="cards-list"></div></div>
     </div>
     <div class="grid two">
-      <div class="card"><h2>資産の内訳</h2><div id="asset-breakdown"></div></div>
-      <div class="card"><h2>1か月以内の引き落とし</h2><div id="upcoming"></div></div>
+      <div class="card"><h2><span data-icon="bank"></span>総資産の内訳</h2><div id="asset-breakdown"></div></div>
+      <div class="card"><h2><span data-icon="calendar"></span>1か月以内の引き落とし</h2><div id="upcoming"></div></div>
     </div>
-    <div class="card"><h2>純資産の推移</h2><div id="worth-chart" class="chart"></div></div>
+    <div class="card"><h2><span data-icon="trend"></span>純資産の推移</h2><div id="worth-chart" class="chart"></div></div>
     <div class="grid two">
-      <div class="card"><h2>固定費・サブスク（月換算）</h2><div id="recurring-summary"></div></div>
-      <div class="card"><h2>ほしいもの</h2><div id="wish-summary"></div></div>
+      <div class="card"><h2><span data-icon="repeat"></span>固定費・サブスク（月換算）</h2><div id="recurring-summary"></div></div>
+      <div class="card"><h2><span data-icon="gift"></span>ほしいもの</h2><div id="wish-summary"></div></div>
     </div>
     <div class="card ai-card">
-      <div class="row-between"><h2>AIのひとこと</h2><button class="primary" id="quick-advice">診断する</button></div>
+      <div class="row-between"><h2><span data-icon="sparkle"></span>AIのひとこと</h2><button class="primary" id="quick-advice">診断する</button></div>
       <div id="quick-advice-out" class="md muted">「診断する」を押すと、今の家計についてアドバイスします。</div>
     </div>
   </section>

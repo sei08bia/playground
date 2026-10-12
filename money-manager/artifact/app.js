@@ -926,6 +926,7 @@ function render() {
   requestAnimationFrame(() => {
     renderQueued = false;
     renderRefs();
+    fillIcons();
     ({ dashboard: renderDashboard, transactions: () => { renderTxTable(); renderGmail(); }, assets: renderAccounts, recurring: renderRecurring,
        wishlist: renderWishlist, advice: renderAdviceHistory, settings: renderSettings }[currentTab])?.();
   });
@@ -991,7 +992,7 @@ function renderTodos() {
     <div><b>${esc(i.title)}</b> <span class="small muted">${esc(i.freq)}</span></div>
     <div class="small ${i.due ? "" : "muted"}">${esc(i.status)}${i.goto ? ` <a href="#" data-goto="${i.goto}">開く</a>` : ""}</div>
     <details><summary class="small">やり方</summary><p class="small">${esc(i.how)}</p></details></div></li>`;
-  $("#todo-card").innerHTML = `<div class="row-between wrap"><h2>わたしのやること</h2><span class="small ${due.length || open.length ? "neg" : "muted"}">${due.length + open.length ? `今やること ${due.length + open.length} 件` : "今やることはありません"}</span></div>
+  $("#todo-card").innerHTML = `<div class="row-between wrap"><h2>${ico("check")}わたしのやること</h2><span class="small ${due.length || open.length ? "neg" : "muted"}">${due.length + open.length ? `今やること ${due.length + open.length} 件` : "今やることはありません"}</span></div>
     <ul class="todo-list">${[...due, ...items.filter((i) => !i.due)].map(row).join("")}</ul>
     <h3 class="small">確認待ち・メモ</h3>
     <ul class="todo-list">${todos.map((t) => `<li class="todo ${t.done ? "done" : "due"}"><label><input type="checkbox" data-todo="${esc(t.id)}" ${t.done ? "checked" : ""}> ${esc(t.text)}</label></li>`).join("") || `<li class="small muted">ありません</li>`}</ul>
@@ -1020,30 +1021,136 @@ document.addEventListener("click", (e) => {
   save("settings"); render();
 });
 
+// ------------------------------------------------------------------ アイコン・グラフの部品
+const ICON_PATHS = {
+  wallet: '<path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3h-4a2 2 0 0 0 0 4h4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  bank: '<path d="M3 21h18M5 21V10M19 21V10M9.5 21V10M14.5 21V10M2 10l10-6 10 6"/>',
+  gauge: '<path d="M12 14l4-4"/><path d="M3.3 19a9 9 0 1 1 17.4 0"/>',
+  check: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="M3.5 6l1.5 1.5L7.5 5M3.5 12l1.5 1.5L7.5 11M3.5 18l1.5 1.5 2.5-2.5"/>',
+  pie: '<path d="M21 12A9 9 0 1 1 12 3v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>',
+  card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
+  calendar: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/>',
+  trend: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+  gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v9H5v-9"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/>',
+  sparkle: '<path d="M12 3l1.9 5.6 5.6 1.9-5.6 1.9L12 18l-1.9-5.6-5.6-1.9 5.6-1.9z"/>',
+  home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+};
+const ico = (n) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[n] || ""}</svg>`;
+const CAT_EMOJI = { 食費: "🍙", コンビニ: "🏪", 外食: "🍽️", 日用品: "🧴", 交通: "🚃", ネットショッピング: "📦", サブスク: "🔁", 通信: "📱", "水道・光熱": "💡", 医療: "🏥",
+  "趣味・娯楽": "🎮", "衣服・美容": "👕", 旅行: "✈️", 住居: "🏠", 保険: "🛡️", 教育: "📚", 交際費: "🍻", 特別な支出: "🎁", その他: "🗂️", 未分類: "❓", 投資: "📈" };
+const KIND_EMOJI = { bank: "🏦", cash: "💴", emoney: "📲", card: "💳", securities: "📈", nisa: "📈", ideco: "🧓", dc: "🧓", loan: "🧾", other: "🎟️" };
+const STATUS_FACE = { ok: "😊", warning: "😐", over: "😣", deficit: "😣" };
+function fillIcons() { $$("[data-icon]").forEach((el) => { if (!el.firstChild) el.innerHTML = ico(el.dataset.icon); }); }
+
+// 今期の日ごとの支出（変動費・自分の分、受け取った精算は差し引き）
+function dailySpending(b) {
+  const start = D.parse(b.period.start), days = b.period.total_days, out = Array(days).fill(0);
+  for (const t of allTx()) {
+    const i = D.parse(t.date) - start;
+    if (i < 0 || i >= days) continue;
+    if (t.type === "expense" && !t.recurring_id) out[i] += mine(t);
+    else if (isSettle(t)) out[i] -= t.amount;
+  }
+  return out;
+}
+function renderCumChart(b) {
+  const days = b.period.total_days, el = b.period.elapsed_days, daily = dailySpending(b), budget = Math.max(b.variable_budget, 1);
+  const cum = []; daily.slice(0, el).reduce((s, v, i) => (cum[i] = s + v), 0);
+  const W = Math.max(300, Math.min(1100, ($("#pace-card").clientWidth || 760) - 40)), narrow = W < 600, H = narrow ? 230 : 240, padL = 44, padR = 10, padT = 14, padB = 24;
+  const maxV = Math.max(budget, b.projected_spent, ...cum, 1);
+  const mag = Math.pow(10, Math.floor(Math.log10(maxV))), step = mag * (maxV / mag > 5 ? 2 : maxV / mag > 2 ? 1 : 0.5), top = Math.ceil(maxV / step) * step;
+  const x = (i) => padL + ((W - padL - padR) * i) / days, y = (v) => padT + (H - padT - padB) * (1 - Math.max(0, v) / top);
+  const start = D.parse(b.period.start);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="今期の支出の累計。${yen(cum[el - 1] || 0)} 使用、予算 ${yen(budget)}"><g class="axis">`;
+  for (let v = 0; v <= top + 1; v += step) svg += `<line class="grid-line" x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}"/><text x="${padL - 6}" y="${y(v) + 4}" text-anchor="end">${man(v)}</text>`;
+  for (let i = 0; i < days; i += narrow ? 7 : 5) svg += `<text x="${x(i + 0.5)}" y="${H - 6}" text-anchor="middle">${md(D.fmt(start + i))}</text>`;
+  svg += `</g>`;
+  svg += `<line class="budget-hline" x1="${padL}" x2="${W - padR}" y1="${y(budget)}" y2="${y(budget)}"/><text class="lbl" x="${W - padR}" y="${y(budget) - 5}" text-anchor="end">予算 ${yen(budget)}</text>`;
+  svg += `<path class="pace-line" d="M${x(0)},${y(0)} L${x(days)},${y(budget)}"/>`;
+  if (cum.length) {
+    const pts = cum.map((v, i) => `${x(i + 1)},${y(v)}`);
+    svg += `<path class="cum-area" d="M${x(0)},${y(0)} L${pts.join(" L")} L${x(el)},${y(0)} Z"/><path class="cum-line" d="M${x(0)},${y(0)} L${pts.join(" L")}"/>`;
+    svg += `<path class="proj-line" d="M${x(el)},${y(cum[el - 1])} L${x(days)},${y(b.projected_spent)}"/>`;
+    svg += `<circle class="today-dot" cx="${x(el)}" cy="${y(cum[el - 1])}" r="5"/><text class="lbl" x="${x(el) + 8}" y="${y(cum[el - 1]) - 8}">今日 ${yen(cum[el - 1])}</text>`;
+  }
+  for (let i = 0; i < days; i++) {
+    const dt = D.fmt(start + i), pace = (budget * (i + 1)) / days;
+    const tip = i < el ? `${md(dt)}|この日 ${yen(daily[i])}|累計 ${yen(cum[i])}|目安 ${yen(pace)}` : `${md(dt)}|目安 ${yen(pace)}`;
+    svg += `<rect x="${x(i)}" y="${padT}" width="${x(1) - x(0)}" height="${H - padT - padB}" fill="transparent" data-tip="${esc(tip)}" data-sw="${i < el ? "--accent,--accent,--muted" : "--muted"}"/>`;
+  }
+  return `<div class="chart">${svg}</svg></div>
+    <div class="flow-legend"><span><span class="sw" style="background:var(--accent)"></span>使った累計</span><span><span class="sw" style="background:var(--muted)"></span>点線＝予算どおりのペース</span><span><span class="sw" style="background:var(--critical)"></span>予算の上限</span></div>`;
+}
+function ring(ratio, status) {
+  const r = 30, c = 2 * Math.PI * r, v = Math.max(0, Math.min(1, ratio));
+  return `<svg class="ring ${status}" viewBox="0 0 76 76" role="img" aria-label="予算の残り ${Math.round(v * 100)}%"><circle class="track" cx="38" cy="38" r="${r}" fill="none" stroke-width="8"/>
+    <circle class="val" cx="38" cy="38" r="${r}" fill="none" stroke-width="8" stroke-linecap="round" stroke-dasharray="${c * v} ${c}" transform="rotate(-90 38 38)"/>
+    <text x="38" y="35" text-anchor="middle" class="face">${STATUS_FACE[status] || ""}</text><text x="38" y="53" text-anchor="middle">${Math.round(v * 100)}%</text></svg>`;
+}
+function donut(slices, total) {
+  const R = 80, r = 54, cx = 85, cy = 85;
+  let a0 = -Math.PI / 2, out = "";
+  const sum = slices.reduce((s, x) => s + x.value, 0) || 1;
+  for (const sl of slices) {
+    const sweep = Math.max((sl.value / sum) * 2 * Math.PI, 0.03), a1 = Math.min(a0 + sweep, a0 + 2 * Math.PI - 0.0001), large = a1 - a0 > Math.PI ? 1 : 0;
+    const p = (rad, ang) => `${cx + rad * Math.cos(ang)},${cy + rad * Math.sin(ang)}`;
+    out += `<path d="M${p(R, a0)} A${R},${R} 0 ${large} 1 ${p(R, a1)} L${p(r, a1)} A${r},${r} 0 ${large} 0 ${p(r, a0)} Z" fill="var(${sl.color})" data-tip="${esc(sl.tip)}" data-sw="${sl.color}"/>`;
+    a0 = a1;
+  }
+  return `<svg class="donut" viewBox="0 0 170 170" role="img" aria-label="総資産 ${yen(total)} の内訳">${out}<text class="c1" x="85" y="80" text-anchor="middle">総資産</text><text class="c2" x="85" y="100" text-anchor="middle">${man(total)}</text></svg>`;
+}
+const ASSET_GROUPS = [["deposit", "預金・現金", "--series-1", ["bank", "cash"]], ["invest", "投資（NISA・特定口座）", "--series-2", ["securities", "nisa"]],
+  ["pension", "年金（iDeCo・企業型DC）", "--series-3", ["ideco", "dc"]], ["emoney", "電子マネー", "--series-4", ["emoney"]], ["other", "ポイント・その他", "--series-5", ["other"]]];
+function renderAssets(d, w) {
+  const accs = d.accounts.filter((a) => Number(a.balance) > 0 && !LIAB.has(a.kind) && a.kind !== "card");
+  const groups = ASSET_GROUPS.map(([k, label, color, kinds]) => {
+    const items = accs.filter((a) => kinds.includes(a.kind)).sort((a, b) => b.balance - a.balance);
+    return { k, label, color, items, value: items.reduce((s, a) => s + Number(a.balance), 0) };
+  }).filter((g) => g.value > 0);
+  const total = groups.reduce((s, g) => s + g.value, 0);
+  if (!total) return `<p class="muted">口座の残高を入れると内訳が出ます。</p>`;
+  const p = (v) => `${((v / total) * 100).toFixed(v / total < 0.1 ? 1 : 0)}%`;
+  return `<div class="donut-wrap">${donut(groups.map((g) => ({ value: g.value, color: g.color, tip: `${g.label}|${yen(g.value)}（${p(g.value)}）` })), total)}
+    <div class="asset-groups">${groups.map((g) => `<div class="asset-group"><div class="head"><span class="sw" style="background:var(${g.color})"></span><span>${esc(g.label)}<span class="p">${p(g.value)}</span>${g.k === "pension" ? '<span class="tag locked">60歳まで引出不可</span>' : ""}</span><span>${yen(g.value)}</span></div>
+      ${g.items.map((a) => `<div class="acc"><span aria-hidden="true">${KIND_EMOJI[a.kind] || "•"}</span><span>${esc(a.name)}</span><span>${yen(a.balance)}</span></div>`).join("")}</div>`).join("")}
+      <div class="asset-total"><span>総資産</span><span>${yen(total)}</span><span class="muted">カード未払い・ローン</span><span class="neg">−${yen(w.liability)}</span><span class="big">純資産</span><span class="big">${yen(total - w.liability)}</span></div></div></div>`;
+}
+
 function renderDashboard() {
   renderTodos();
+  fillIcons();
   const d = dashboard();
   const b = d.budget, w = d.net_worth;
   $("#onboarding").hidden = !(b.income === 0 || !d.accounts.some((a) => a.kind !== "card" && Number(a.balance)));
   $("#onboarding").innerHTML = `はじめに <a href="#" data-goto="settings">設定</a> で手取り月収を、<a href="#" data-goto="assets">口座・資産</a> で預金・NISA・iDeCo の残高を入れてください。${d.accounts.some((a) => a.kind === "card") ? "登録済みのカードはそのまま使えます。" : ""}`;
 
-  $("#hero-month").innerHTML = `<div class="label">今月あと使えるお金 <span class="status ${b.status}">${STATUS_TEXT[b.status]}</span></div>
-    <div class="value ${b.remaining < 0 ? "neg" : ""}">${yen(b.remaining)}</div>
+  $("#hero-month").innerHTML = `<div class="hero-top"><div><div class="label">今月あと使えるお金 <span class="status ${b.status}">${STATUS_TEXT[b.status]}</span></div>
+    <div class="value ${b.remaining < 0 ? "neg" : ""}">${yen(b.remaining)}</div></div>${ring(b.variable_budget > 0 ? b.remaining / b.variable_budget : 0, b.status)}</div>
     <div class="sub">${md(b.period.start)}〜${md(b.period.end)}・残り${b.period.days_left}日／変動費の予算 ${yen(b.variable_budget)}</div>`;
-  $("#hero-today").innerHTML = `<div class="label">今日あと使えるお金</div>
-    <div class="value ${b.today_remaining < 0 ? "neg" : ""}">${yen(b.today_remaining)}</div>
+  $("#hero-today").innerHTML = `<div class="hero-top"><div><div class="label">今日あと使えるお金</div>
+    <div class="value ${b.today_remaining < 0 ? "neg" : ""}">${yen(b.today_remaining)}</div></div><span class="badge">${ico("sun")}</span></div>
     <div class="sub">1日あたり ${yen(b.daily_allowance)}・今日の支出 ${yen(b.today_spent)}</div>`;
-  $("#hero-worth").innerHTML = `<div class="label">純資産（NISA・iDeCo 含む）</div>
-    <div class="value">${yen(w.net_worth)}</div>
+  $("#hero-worth").innerHTML = `<div class="hero-top"><div><div class="label">純資産（NISA・iDeCo 含む）</div>
+    <div class="value">${yen(w.net_worth)}</div></div><span class="badge">${ico("bank")}</span></div>
     <div class="sub">すぐ使えるお金 ${yen(w.spendable)}（預金 − カード未払い）</div>`;
 
   const budget = Math.max(b.variable_budget, 1);
   const cls = b.status === "ok" ? "" : b.status === "warning" ? "warning" : "over";
-  $("#pace-card").innerHTML = `<div class="row-between wrap"><h2>今期の使ったペース</h2><span class="small muted">縦線＝今日時点の目安（${yen(b.expected_by_now)}）</span></div>
+  const inc = Math.max(b.income, 1), flowParts = [["固定費", b.fixed_monthly, "--series-1"], ["積立・先取り貯金", b.investment_monthly + b.savings_goal, "--series-3"], ["使った", Math.max(0, b.spent), "--series-2"]];
+  const restV = Math.max(0, b.remaining);
+  const flowHtml = `<h2>${ico("pie")}今月のお金の行き先（手取り ${yen(b.income)}）</h2>
+    <div class="flow" role="img" aria-label="手取りの内訳">${flowParts.filter(([, v]) => v > 0).map(([l, v, c]) => `<div style="flex:${v};background:var(${c})" data-tip="${l}|${yen(v)}（${pct(v / inc)}）" data-sw="${c}"></div>`).join("")}${restV ? `<div class="rest" style="flex:${restV}" data-tip="あと使える|${yen(restV)}（${pct(restV / inc)}）"></div>` : ""}</div>
+    <div class="flow-legend">${flowParts.map(([l, v, c]) => `<span><span class="sw" style="background:var(${c})"></span>${l}<b>${yen(v)}</b></span>`).join("")}<span><span class="sw" style="background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--border)"></span>あと使える<b>${yen(restV)}</b></span></div>`;
+  $("#pace-card").innerHTML = flowHtml + `<div class="row-between wrap" style="margin-top:16px"><h2>${ico("gauge")}今期の使ったペース</h2><span class="small muted">縦線＝今日時点の目安（${yen(b.expected_by_now)}）</span></div>
     <div class="meter" role="img" aria-label="予算 ${yen(b.variable_budget)} のうち ${yen(b.spent)} 使用"><div class="fill ${cls}" style="width:${Math.min(100, (b.spent / budget) * 100)}%"></div><div class="mark" style="left:calc(${Math.min(100, (b.period.elapsed_days / b.period.total_days) * 100)}% - 1px)"></div></div>
     <div class="meter-legend"><span>使った ${yen(b.spent)}（${pct(b.spent / budget)}）${b.reimbursed ? `<span class="muted">・立替の精算 ${yen(b.reimbursed)} を差し引き済み</span>` : ""}</span>
       <span>このペースだと月末 ${yen(b.projected_spent)} → ${b.projected_surplus >= 0 ? `${yen(b.projected_surplus)} 余る見込み` : `<b class="neg">${yen(-b.projected_surplus)} 足りない見込み</b>`}</span>
-      <span>収入 ${yen(b.income)} − 固定費 ${yen(b.fixed_monthly)} − 積立 ${yen(b.investment_monthly)} − 先取り貯金 ${yen(b.savings_goal)}</span></div>`;
+      <span>収入 ${yen(b.income)} − 固定費 ${yen(b.fixed_monthly)} − 積立 ${yen(b.investment_monthly)} − 先取り貯金 ${yen(b.savings_goal)}</span></div>
+    <div class="chart-sub">日ごとの使った累計</div>${renderCumChart(b)}`;
 
   const alerts = [];
   for (const p of d.payment_checks) if (p.shortfall > 0) alerts.push(["", `<b>${esc(p.account)}</b> の残高 ${yen(p.balance)} に対し、1か月以内に ${yen(p.due_amount)} の引き落とし予定。<b>${yen(p.shortfall)} 不足</b>しています。`]);
@@ -1056,9 +1163,9 @@ function renderDashboard() {
   const maxCat = Math.max(1, ...cats.map((c) => Math.max(c.spent, c.budget || 0)));
   $("#cat-chart").innerHTML = cats.length ? `<div class="bars">${cats.map((c) => `
     <div class="bar-row" data-tip="${esc(c.category)}|使った ${yen(c.spent)}${c.budget ? `|予算 ${yen(c.budget)}（${pct(c.ratio)}）|残り ${yen(c.remaining)}` : ""}">
-      <span class="name">${esc(c.category)}</span>
+      <span class="name"><span class="emo" aria-hidden="true">${CAT_EMOJI[c.category] || "•"}</span>${esc(c.category)}</span>
       <div class="bar-track"><div class="fill ${c.budget && c.spent > c.budget ? "over" : ""}" style="width:${(c.spent / maxCat) * 100}%"></div>${c.budget ? `<div class="budget-line" style="left:calc(${(c.budget / maxCat) * 100}% - 1px)"></div>` : ""}</div>
-      <span class="amt">${yen(c.spent)}${c.budget ? ` <span class="muted">/ ${man(c.budget)}</span>` : ""}</span></div>`).join("")}</div>
+      <span class="amt">${yen(c.spent)}${c.budget ? ` <span class="muted">/ ${man(c.budget)}</span>` : `<span class="pct">${pct(c.spent / Math.max(1, cats.reduce((s, x) => s + x.spent, 0)))}</span>`}</span></div>`).join("")}</div>
     <p class="small muted">縦線＝カテゴリ予算。固定費として照合された明細は含みません。</p>`
     : `<p class="muted">今期の支出はまだありません。<a href="#" data-goto="transactions">明細</a>でカードの CSV を取り込むか、支出を記録してください。</p>`;
 
@@ -1071,12 +1178,7 @@ function renderDashboard() {
       ${c.limit ? `<div class="meta">枠 ${pct(c.limit_usage)} 使用</div>` : ""}</div></div>`).join("")}</div>`
     : `<p class="muted">カードが未登録です。<a href="#" data-goto="assets">登録する</a></p>`;
 
-  const groups = [["liquid", "預金・現金", "--series-1"], ["invest", "投資（NISA・特定口座）", "--series-2"], ["pension", "年金（iDeCo・企業型DC）", "--series-3"], ["other", "その他", "--series-4"]];
-  const totalA = Math.max(1, w.total_assets);
-  $("#asset-breakdown").innerHTML = `
-    ${w.total_assets > 0 ? `<div class="stack" role="img" aria-label="資産の内訳">${groups.filter(([k]) => w[k] > 0).map(([k, label, v]) => `<div style="flex:${w[k]};background:var(${v})" data-tip="${label}|${yen(w[k])}（${pct(w[k] / totalA)}）"></div>`).join("")}</div>` : `<p class="muted">口座の残高を入れると内訳が出ます。</p>`}
-    <div class="legend">${groups.filter(([k]) => w[k] > 0 || k !== "other").map(([k, label, v]) => `<div class="item"><span class="sw" style="background:var(${v})"></span><span>${label}${k === "pension" ? '<span class="tag locked">60歳まで引出不可</span>' : ""}</span><span class="amt">${yen(w[k])}</span></div>`).join("")}
-      <div class="item"><span></span><span class="muted">負債（ローン・カード未払い）</span><span class="amt neg">−${yen(w.liability)}</span></div></div>
+  $("#asset-breakdown").innerHTML = `${renderAssets(d, w)}
     ${w.investments.length ? `<h3>運用成績</h3><div class="list">${w.investments.map((i) => `<div class="item"><div><div class="title">${esc(i.name)}</div><div class="meta">元本 ${yen(i.contributed)}</div></div><div class="right"><div>${yen(i.balance)}</div>${i.gain != null ? `<div class="meta ${i.gain < 0 ? "neg" : ""}">${i.gain >= 0 ? "+" : ""}${yen(i.gain)}（${i.gain_ratio != null ? (i.gain_ratio * 100).toFixed(1) : "-"}%）</div>` : ""}</div></div>`).join("")}</div>` : ""}
     <p class="small muted">生活防衛資金: すぐ使えるお金は生活費の <b>${d.emergency_fund.months_covered != null ? d.emergency_fund.months_covered.toFixed(1) : "-"}</b> か月分（目標 ${d.emergency_fund.target_months} か月 = ${yen(d.emergency_fund.target_amount)}）</p>`;
 
@@ -1102,8 +1204,8 @@ function renderDashboard() {
 
 function renderWorthChart(el, history) {
   if (!history.length) { el.innerHTML = `<p class="muted">口座の残高を更新するたびに記録され、ここに月ごとの推移が表示されます。</p>`; return; }
-  const series = [["liquid", "預金・現金", "--series-1"], ["invest", "投資", "--series-2"], ["pension", "年金", "--series-3"], ["other", "その他", "--series-4"]].filter(([k]) => history.some((h) => h[k] > 0));
-  const W = 760, H = 240, padL = 48, padR = 8, padT = 10, padB = 24;
+  const series = [["liquid", "預金・現金", "--series-1"], ["invest", "投資", "--series-2"], ["pension", "年金", "--series-3"], ["other", "その他", "--series-5"]].filter(([k]) => history.some((h) => h[k] > 0));
+  const W = Math.max(300, Math.min(1100, (el.clientWidth || 760))), H = 240, padL = 44, padR = 8, padT = 10, padB = 24;
   const maxV = Math.max(1, ...history.map((h) => series.reduce((s, [k]) => s + h[k], 0)));
   const mag = Math.pow(10, Math.floor(Math.log10(maxV)));
   const step = mag * (maxV / mag > 5 ? 2 : 1);
@@ -1554,3 +1656,6 @@ showTab(currentTab);
   }
   setInterval(maybeAutoSync, 5 * 60000);
 })();
+// グラフは表示幅に合わせて描くので、幅が変わったら描き直す
+let resizeTimer, lastW = window.innerWidth;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (Math.abs(window.innerWidth - lastW) > 40) { lastW = window.innerWidth; render(); } }, 200); });
