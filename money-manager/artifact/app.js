@@ -1137,6 +1137,13 @@ function renderAssets(d, w) {
       <div class="asset-total"><span>総資産</span><span>${yen(total)}</span><span class="muted">カード未払い・ローン</span><span class="neg">−${yen(w.liability)}</span><span class="big">純資産</span><span class="big">${yen(total - w.liability)}</span></div></div></div>`;
 }
 
+// 純資産のカードを押すと総資産の内訳をポップアップで出す
+let lastAssets = "";
+function openAssets() { $("#asset-dialog-body").innerHTML = lastAssets; fillIcons(); $("#asset-dialog").showModal(); }
+$("#hero-worth").addEventListener("click", openAssets);
+$("#hero-worth").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openAssets(); } });
+$("#asset-dialog").addEventListener("click", (e) => { if (e.target.closest("[data-close]") || e.target === e.currentTarget) e.currentTarget.close(); });
+
 function renderDashboard() {
   renderTodos();
   fillIcons();
@@ -1153,6 +1160,7 @@ function renderDashboard() {
     <div class="sub">1日あたり ${yen(b.daily_allowance)}・今日の支出 ${yen(b.today_spent)}</div>`;
   $("#hero-worth").innerHTML = `<div class="hero-top"><div><div class="label">純資産（NISA・iDeCo 含む）</div>
     <div class="value">${yen(w.net_worth)}</div></div><span class="badge">${ico("bank")}</span></div>
+    <div class="sub">総資産 ${yen(w.total_assets)} − カード未払い ${yen(w.liability)} <span class="more">内訳 ›</span></div>
     <div class="sub">すぐ使えるお金 ${yen(w.spendable)}（預金 − カード未払い）</div>`;
 
   const budget = Math.max(b.variable_budget, 1);
@@ -1195,7 +1203,9 @@ function renderDashboard() {
       ${c.limit ? `<div class="meta">枠 ${pct(c.limit_usage)} 使用</div>` : ""}</div></div>`).join("")}</div>`
     : `<p class="muted">カードが未登録です。<a href="#" data-goto="assets">登録する</a></p>`;
 
-  $("#asset-breakdown").innerHTML = `${renderAssets(d, w)}
+  lastAssets = renderAssets(d, w);
+  if ($("#asset-dialog").open) $("#asset-dialog-body").innerHTML = lastAssets;
+  $("#asset-breakdown").innerHTML = `${lastAssets}
     ${w.investments.length ? `<h3>運用成績</h3><div class="list">${w.investments.map((i) => `<div class="item"><div><div class="title">${esc(i.name)}</div><div class="meta">元本 ${yen(i.contributed)}</div></div><div class="right"><div>${yen(i.balance)}</div>${i.gain != null ? `<div class="meta ${i.gain < 0 ? "neg" : ""}">${i.gain >= 0 ? "+" : ""}${yen(i.gain)}（${i.gain_ratio != null ? (i.gain_ratio * 100).toFixed(1) : "-"}%）</div>` : ""}</div></div>`).join("")}</div>` : ""}
     <p class="small muted">生活防衛資金: すぐ使えるお金は生活費の <b>${d.emergency_fund.months_covered != null ? d.emergency_fund.months_covered.toFixed(1) : "-"}</b> か月分（目標 ${d.emergency_fund.target_months} か月 = ${yen(d.emergency_fund.target_amount)}）</p>`;
 

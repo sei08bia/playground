@@ -296,3 +296,13 @@ h2 .ico, h2 [data-icon] .ico { margin-right: 6px; color: var(--accent); }
 .asset-group .acc { display: grid; grid-template-columns: 22px 1fr auto; gap: 6px; padding: 2px 0 2px 20px; color: var(--text-2); font-size: 13px; }
 .asset-total { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px; font-size: 13.5px; }
 .asset-total .big { font-weight: 700; font-size: 15px; }
+.hero.clickable { cursor: pointer; transition: box-shadow .15s, transform .15s; }
+.hero.clickable:hover { box-shadow: 0 0 0 2px var(--accent); }
+.hero.clickable:active { transform: scale(.99); }
+.hero .more { color: var(--accent); font-weight: 600; white-space: nowrap; margin-left: 4px; }
+dialog.sheet { border: 0; border-radius: 16px; padding: 20px; width: min(560px, calc(100% - 32px)); max-height: calc(100% - 48px); overflow: auto;
+  background: var(--surface); color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+dialog.sheet::backdrop { background: rgba(0,0,0,.45); }
+dialog.sheet .close { border: 0; background: var(--surface-2); color: var(--text); width: 32px; height: 32px; border-radius: 50%; font-size: 15px; cursor: pointer; }
+dialog.sheet .donut-wrap { grid-template-columns: 1fr; justify-items: center; }
+dialog.sheet .asset-groups { width: 100%; }

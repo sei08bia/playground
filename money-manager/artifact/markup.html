@@ -22,7 +22,7 @@
     <div class="grid hero-grid">
       <div class="card hero" id="hero-month"></div>
       <div class="card hero" id="hero-today"></div>
-      <div class="card hero" id="hero-worth"></div>
+      <div class="card hero clickable" id="hero-worth" role="button" tabindex="0" aria-haspopup="dialog" aria-label="総資産の内訳を見る"></div>
     </div>
     <div class="card" id="pace-card"></div>
     <div class="card" id="todo-card"></div>
@@ -247,5 +247,9 @@
 </main>
 
 <datalist id="category-list"></datalist>
+<dialog id="asset-dialog" class="sheet" aria-labelledby="asset-dialog-title">
+  <div class="row-between"><h2 id="asset-dialog-title"><span data-icon="bank"></span>総資産の内訳</h2><button type="button" class="close" data-close aria-label="閉じる">✕</button></div>
+  <div id="asset-dialog-body"></div>
+</dialog>
 <div id="tooltip" class="tooltip" hidden></div>
 <div id="toast" class="toast" hidden></div>
