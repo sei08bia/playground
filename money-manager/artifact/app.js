@@ -969,8 +969,10 @@ function todoItems() {
     items.push({ due: !last || ago(last) > 31, title: "PayPay の CSV を取り込む", freq: "月1回", status: agoText(last), goto: "transactions",
       how: "PayPay アプリのホーム →［取引履歴］→ 右上の［取引履歴のダウンロード］→ 期間を選んで［ダウンロード申請をする］→ 通知が来たら［申請ステータス］からダウンロード（24 時間以内）→「CSV を取り込む」で選ぶだけ（PayPay は自動で判別します）。受け取った立替の精算は自動で支出から差し引かれます。" });
   }
-  const stale = accounts().filter((a) => a.kind !== "card" && (!a.updated_at || ago(a.updated_at) > 31 || /未入力/.test(a.note || "")));
-  items.push({ due: stale.length > 0, title: "口座・電子マネー・ポイントの残高を更新する", freq: "月1回", goto: "assets",
+  // 給料（25日）とカード・家賃の引き落とし（27日）が済んだ 28 日ごろに、月1回まとめて更新する
+  const last28 = day >= 28 ? D.ymd(y, m, 28) : D.ymd(...D.addM(y, m, -1), 28);
+  const stale = accounts().filter((a) => a.kind !== "card" && (!a.updated_at || D.parse(a.updated_at) < last28 || /未入力/.test(a.note || "")));
+  items.push({ due: stale.length > 0, title: "口座・電子マネー・ポイントの残高を更新する", freq: "月1回（毎月28日ごろ）", goto: "assets",
     status: stale.length ? `更新が必要: ${stale.map((a) => a.name).join("、")}` : "すべて1か月以内に更新済み",
     how: "各アプリで残高を見て「口座・資産」タブで入力。Claude に金額を伝えても入れてもらえます。" });
   const [ps, pe] = periodBounds(today, settings().cycle_start_day);
