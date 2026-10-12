@@ -1320,19 +1320,32 @@ $("#quick-advice").addEventListener("click", (e) => ask("", $("#quick-advice-out
 // ------------------------------------------------------------------ 明細
 const txForm = $("#tx-form");
 const thisMonth = () => D.fmt(D.today()).slice(0, 7);
-if (!$("#tx-month").value) $("#tx-month").value = thisMonth();
+// 明細は「給料日〜締め」の期間ごとに見る（ダッシュボードの「今月」と同じ区切り）
+const cycleDay = () => settings().cycle_start_day;
+let txWant = null;
+function setTxPeriodFor(dateStr) { txWant = D.fmt(periodBounds(D.parse(dateStr), cycleDay())[0]); }
+function fillPeriodOptions() {
+  const sel = $("#tx-month"), prev = sel.value, today = D.today();
+  const opts = [periodBounds(today, cycleDay()), ...previousPeriods(today, cycleDay(), 12)];
+  sel.innerHTML = opts.map(([a, b], i) => `<option value="${D.fmt(a)}">${md(D.fmt(a))}〜${md(D.fmt(b - 1))}${i === 0 ? "（今期）" : ""}</option>`).join("");
+  const want = txWant || prev;
+  sel.value = opts.some(([a]) => D.fmt(a) === want) ? want : D.fmt(opts[0][0]);
+  txWant = null;
+}
+const txPeriod = () => { const [a, b] = periodBounds(D.parse($("#tx-month").value || D.fmt(D.today())), cycleDay()); return [a, b]; };
 if (!txForm.date.value) txForm.date.value = D.fmt(D.today());
 
-async function onMonthChange() { await ensureMonths([$("#tx-month").value]); render(); }
+async function onMonthChange() { const [a, b] = txPeriod(); await ensureMonths([D.ym(D.fmt(a)), D.ym(D.fmt(b - 1))]); render(); }
 $("#tx-month").addEventListener("change", onMonthChange);
 $("#tx-account").addEventListener("change", render);
 $("#tx-search").addEventListener("input", render);
 
 function renderTxTable() {
-  const ym = $("#tx-month").value || thisMonth();
+  fillPeriodOptions();
+  const [pa, pb] = txPeriod();
   const acc = $("#tx-account").value;
   const q = $("#tx-search").value.trim().toLowerCase();
-  const rows = (S.tx[ym] || []).filter((t) => (!acc || t.account_id === acc) && (!q || `${t.description} ${t.category} ${t.memo || ""}`.toLowerCase().includes(q)))
+  const rows = allTx().filter((t) => inRange(t.date, pa, pb) && (!acc || t.account_id === acc) && (!q || `${t.description} ${t.category} ${t.memo || ""}`.toLowerCase().includes(q)))
     .sort((a, b) => b.date.localeCompare(a.date));
   const accName = (id) => accounts().find((a) => a.id === id)?.name || "";
   const recName = (id) => recurring().find((r) => r.id === id)?.name || "";
@@ -1350,7 +1363,7 @@ function renderTxTable() {
         ${t.memo ? `<div class="tx-memo">${esc(t.memo)}</div>` : ""}</div>
       <div class="tx-amt ${t.type}">${t.type === "income" ? "+" : t.type === "transfer" ? "" : "−"}${yen(t.amount)}
         <div class="tx-act"><button class="link-btn" data-edit-tx="${esc(t.id)}" type="button">編集</button><button class="link-btn danger" data-del-tx="${esc(t.id)}" type="button">${pendingDelete === t.id ? "本当に削除" : "削除"}</button></div></div></div>`; }).join("")}</div>`).join("")
-    : `<p class="muted">この月の明細はありません。右下の ＋ から記録するか、カードの CSV を取り込んでください。</p>`;
+    : `<p class="muted">この期間の明細はありません。右下の ＋ から記録するか、カードの CSV を取り込んでください。</p>`;
 }
 
 // confirm() が使えないので、削除はボタンを 2 回押して確定する
@@ -1397,7 +1410,7 @@ txForm.addEventListener("submit", async (e) => {
   txForm.reset();
   idField(txForm).value = "";
   txForm.date.value = keep;
-  $("#tx-month").value = D.ym(keep);
+  setTxPeriodFor(keep);
   render();
 });
 txForm.addEventListener("click", (e) => {
@@ -1500,7 +1513,7 @@ async function uploadCsv(dryRun) {
   $("#csv-result").innerHTML = `<p>${r.items.length} 件を読み取り、${dryRun ? "取り込み対象" : "取り込み"} ${r.inserted} 件／重複スキップ ${r.skipped} 件${r.merged ? `／メールで取り込み済みの明細と統合 ${r.merged} 件` : ""}${r.aiCategorized ? `／AI がカテゴリを判定 ${r.aiCategorized} 件` : ""}</p>
     <div class="table-wrap"><table><tbody>${r.items.slice(0, 10).map((p) => `<tr><td>${p.date}</td><td class="desc">${esc(p.description)}</td><td>${esc(p.category)}</td><td class="num">${p.type === "income" ? "+" : p.type === "transfer" ? "⇄ " : ""}${yen(p.amount)}</td></tr>`).join("")}</tbody></table></div>
     ${r.items.length > 10 ? `<p class="small muted">先頭 10 件を表示</p>` : ""}`;
-  if (!dryRun) { toast(`${r.inserted} 件取り込みました`); if (r.items[0]) $("#tx-month").value = D.ym(r.items[0].date); render(); }
+  if (!dryRun) { toast(`${r.inserted} 件取り込みました`); if (r.items[0]) setTxPeriodFor(r.items.map((x) => x.date).sort().pop()); render(); }
 }
 $("#csv-preview").addEventListener("click", () => uploadCsv(true));
 csvForm.addEventListener("submit", (e) => { e.preventDefault(); uploadCsv(false); });
