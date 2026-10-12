@@ -201,7 +201,9 @@ function recurringSummary(rec, today) {
 }
 
 const inRange = (s, a, b) => { const d = D.parse(s); return a <= d && d < b; };
-const variableSpending = (txs, a, b) => txs.filter((t) => t.type === "expense" && !t.recurring_id && inRange(t.date, a, b)).reduce((s, t) => s + t.amount, 0);
+// 立て替えた明細は自分の負担額だけを支出に数える（カードの請求額との照合は元の金額のまま）
+const mine = (t) => (t.own_share != null && t.own_share >= 0 && t.own_share < t.amount ? t.own_share : t.amount);
+const variableSpending = (txs, a, b) => txs.filter((t) => t.type === "expense" && !t.recurring_id && inRange(t.date, a, b)).reduce((s, t) => s + mine(t), 0);
 
 function budgetSummary(st, rec, txs, today) {
   const [start, end] = periodBounds(today, st.cycle_start_day);
@@ -213,8 +215,8 @@ function budgetSummary(st, rec, txs, today) {
   const savingsGoal = Number(st.savings_goal) || 0;
   const variableBudget = income - rs.monthly_spending - rs.monthly_investment - savingsGoal;
   const expenses = txs.filter((t) => t.type === "expense" && inRange(t.date, start, end));
-  const spent = expenses.filter((t) => !t.recurring_id).reduce((s, t) => s + t.amount, 0);
-  const todaySpent = expenses.filter((t) => !t.recurring_id && D.parse(t.date) === today).reduce((s, t) => s + t.amount, 0);
+  const spent = expenses.filter((t) => !t.recurring_id).reduce((s, t) => s + mine(t), 0);
+  const todaySpent = expenses.filter((t) => !t.recurring_id && D.parse(t.date) === today).reduce((s, t) => s + mine(t), 0);
   const remaining = variableBudget - spent;
   const daily = daysLeft > 0 ? Math.floor((remaining + todaySpent) / daysLeft) : remaining;
   const expected = totalDays ? (variableBudget * elapsed) / totalDays : 0;
@@ -222,7 +224,7 @@ function budgetSummary(st, rec, txs, today) {
   const projected = elapsed > 0 ? Math.round((spent / elapsed) * totalDays) : spent;
   const status = variableBudget <= 0 && income > 0 ? "deficit" : remaining < 0 ? "over" : pace != null && pace > 1.05 ? "warning" : "ok";
   const byCat = {};
-  for (const t of expenses) if (!t.recurring_id) byCat[t.category || "未分類"] = (byCat[t.category || "未分類"] || 0) + t.amount;
+  for (const t of expenses) if (!t.recurring_id) byCat[t.category || "未分類"] = (byCat[t.category || "未分類"] || 0) + mine(t);
   const budgets = st.category_budgets || {};
   const categories = [...new Set([...Object.keys(byCat), ...Object.keys(budgets)])].sort((a, b) => (byCat[b] || 0) - (byCat[a] || 0)).map((cat) => {
     const b = Number(budgets[cat]) || 0, s = byCat[cat] || 0;
@@ -1060,7 +1062,7 @@ function renderTxTable() {
   const inc = rows.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   $("#tx-total").textContent = `${rows.length} 件／支出 ${yen(exp)}／収入 ${yen(inc)}`;
   $("#tx-table").innerHTML = rows.length ? `<thead><tr><th>日付</th><th>内容</th><th>カテゴリ</th><th>口座</th><th class="num">金額</th><th></th></tr></thead><tbody>` +
-    rows.map((t) => `<tr><td>${md(t.date)}</td><td class="desc">${esc(t.description)}${t.source === "gmail" ? '<span class="tag">メール</span>' : t.source === "receipt" ? '<span class="tag">購入メール</span>' : ""}${t.recurring_id ? `<span class="tag">固定費: ${esc(recName(t.recurring_id))}</span>` : ""}${t.memo ? `<div class="muted small">${esc(t.memo)}</div>` : ""}</td>
+    rows.map((t) => `<tr><td>${md(t.date)}</td><td class="desc">${esc(t.description)}${t.source === "gmail" ? '<span class="tag">メール</span>' : t.source === "receipt" ? '<span class="tag">購入メール</span>' : ""}${t.recurring_id ? `<span class="tag">固定費: ${esc(recName(t.recurring_id))}</span>` : ""}${t.own_share != null && t.own_share < t.amount ? `<span class="tag">立替 自分の分 ${yen(t.own_share)}</span>` : ""}${t.memo ? `<div class="muted small">${esc(t.memo)}</div>` : ""}</td>
       <td>${esc(t.category)}</td><td>${esc(accName(t.account_id))}</td><td class="num">${t.type === "income" ? "+" : t.type === "transfer" ? "⇄ " : "−"}${yen(t.amount)}</td>
       <td><button class="link-btn" data-edit-tx="${esc(t.id)}" type="button">編集</button><button class="link-btn danger" data-del-tx="${esc(t.id)}" type="button">${pendingDelete === t.id ? "本当に削除" : "削除"}</button></td></tr>`).join("") + "</tbody>"
     : `<tbody><tr><td class="muted">この月の明細はありません。上のフォームで記録するか、カードの CSV を取り込んでください。</td></tr></tbody>`;
@@ -1089,7 +1091,8 @@ txForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = formData(txForm);
   if (!f.date || !(f.amount > 0)) { toast("日付と金額を入れてください"); return; }
-  const tx = { date: f.date, amount: Math.round(f.amount), type: f.type || "expense", category: f.category || (f.type === "income" ? "収入" : guessCategory(f.description)),
+  const own = f.own_share != null && f.own_share >= 0 && f.own_share < f.amount ? Math.round(f.own_share) : null;
+  const tx = { date: f.date, amount: Math.round(f.amount), own_share: own, type: f.type || "expense", category: f.category || (f.type === "income" ? "収入" : guessCategory(f.description)),
     account_id: f.account_id || null, description: f.description, memo: f.memo, recurring_id: f.recurring_id || (f.type === "expense" ? matchRecurring(f.description) : null) };
   await ensureMonths([D.ym(f.date)]);
   if (f.id) {
@@ -1111,6 +1114,13 @@ txForm.addEventListener("submit", async (e) => {
   txForm.date.value = keep;
   $("#tx-month").value = D.ym(keep);
   render();
+});
+txForm.addEventListener("click", (e) => {
+  const n = Number(e.target.dataset.split);
+  if (!n) return;
+  const amount = Number(txForm.amount.value);
+  if (!(amount > 0)) { toast("先に金額を入れてください"); return; }
+  txForm.own_share.value = Math.round(amount / n);
 });
 txForm.addEventListener("reset", () => setTimeout(() => { idField(txForm).value = ""; if (!txForm.date.value) txForm.date.value = D.fmt(D.today()); }));
 

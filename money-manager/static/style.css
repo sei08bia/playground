@@ -233,3 +233,7 @@ pre:empty { display: none; }
 .st-merged { color: var(--text-2); }
 .st-no_account { color: var(--warning-ink); }
 .st-ignored { color: var(--muted); }
+
+.own-share { display: grid; gap: 6px; }
+.split-buttons { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; color: var(--text-2); }
+.split-buttons button { padding: 3px 9px; font-size: 12px; }

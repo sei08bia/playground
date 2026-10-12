@@ -58,6 +58,12 @@
         </div>
         <label>日付<input type="date" name="date" required></label>
         <label>金額（円）<input type="number" name="amount" min="1" required inputmode="numeric"></label>
+        <div class="own-share">
+          <label for="tx-own">自分の負担額（立て替えたときだけ）<input type="number" id="tx-own" name="own_share" min="0" inputmode="numeric" placeholder="空欄なら全額が自分の分"></label>
+          <div class="split-buttons small" aria-label="割り勘で計算">割り勘:
+            <button type="button" data-split="2">÷2</button><button type="button" data-split="3">÷3</button><button type="button" data-split="4">÷4</button><button type="button" data-split="5">÷5</button><button type="button" data-split="6">÷6</button><button type="button" data-split="8">÷8</button>
+          </div>
+        </div>
         <label>内容<input name="description" placeholder="例: スーパー"></label>
         <label>カテゴリ<input name="category" list="category-list" placeholder="自動判定"></label>
         <label>支払い方法<select name="account_id" class="account-select"></select></label>
