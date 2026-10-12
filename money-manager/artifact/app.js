@@ -1154,10 +1154,12 @@ function renderDashboard() {
 
   $("#hero-month").innerHTML = `<div class="hero-top"><div><div class="label">今月あと使えるお金 <span class="status ${b.status}">${STATUS_TEXT[b.status]}</span></div>
     <div class="value ${b.remaining < 0 ? "neg" : ""}">${yen(b.remaining)}</div></div>${ring(b.variable_budget > 0 ? b.remaining / b.variable_budget : 0, b.status)}</div>
-    <div class="sub">${md(b.period.start)}〜${md(b.period.end)}・残り${b.period.days_left}日／変動費の予算 ${yen(b.variable_budget)}</div>`;
+    <div class="calc">予算 ${yen(b.variable_budget)} − 使った ${yen(b.spent)}</div>
+    <div class="sub">${md(b.period.start)}〜${md(b.period.end)}（給料日〜締め）・残り${b.period.days_left}日</div>`;
   $("#hero-today").innerHTML = `<div class="hero-top"><div><div class="label">今日あと使えるお金</div>
     <div class="value ${b.today_remaining < 0 ? "neg" : ""}">${yen(b.today_remaining)}</div></div><span class="badge">${ico("sun")}</span></div>
-    <div class="sub">1日あたり ${yen(b.daily_allowance)}・今日の支出 ${yen(b.today_spent)}</div>`;
+    <div class="calc">今月あと ${yen(b.remaining + b.today_spent)} ÷ 残り${b.period.days_left}日（今日〜${md(b.period.end)}）${b.today_spent ? ` − 今日使った ${yen(b.today_spent)}` : ""}</div>
+    <div class="sub">毎日この額までなら、締めの日に予算ぴったりで終われます</div>`;
   $("#hero-worth").innerHTML = `<div class="hero-top"><div><div class="label">純資産（NISA・iDeCo 含む）</div>
     <div class="value">${yen(w.net_worth)}</div></div><span class="badge">${ico("bank")}</span></div>
     <div class="sub">総資産 ${yen(w.total_assets)} − カード未払い ${yen(w.liability)} <span class="more">内訳 ›</span></div>

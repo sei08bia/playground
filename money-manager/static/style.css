@@ -306,3 +306,4 @@ dialog.sheet::backdrop { background: rgba(0,0,0,.45); }
 dialog.sheet .close { border: 0; background: var(--surface-2); color: var(--text); width: 32px; height: 32px; border-radius: 50%; font-size: 15px; cursor: pointer; }
 dialog.sheet .donut-wrap { grid-template-columns: 1fr; justify-items: center; }
 dialog.sheet .asset-groups { width: 100%; }
+.hero .calc { font-size: 13px; color: var(--text-2); background: var(--surface-2); border-radius: 8px; padding: 4px 8px; margin: 6px 0 4px; display: inline-block; }
