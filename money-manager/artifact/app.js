@@ -621,6 +621,29 @@ JSON 配列だけを返します。メール 1 通につき 1 要素:
 - category は次から 1 つ: ${cats.join("、")}
 - card_last4 はカード番号の下 4 桁が書いてあるときだけ。返金・取消の連絡なら refund を true。`;
 
+function receiptInput(cats, batch) {
+  return RECEIPT_PROMPT(cats) + "\n\n" + batch.map((b) => `=== メールID: ${b.meta.id}\n受信日: ${b.received}\n送信元: ${b.meta.sender}\n件名: ${b.meta.subject}\n本文:\n${b.text}`).join("\n\n");
+}
+
+// 返事が JSON として読めなかったまとまりは 1 通ずつ読み直し、それでも駄目なメールは飛ばす
+// （同じメールで毎回止まらないように）。利用上限や許可なしはそのまま呼び出し元へ。
+async function extractReceipts(sample, cats, batch) {
+  try {
+    const out = await sample.json(receiptInput(cats, batch), { modelTier: "default", cache: false });
+    return Array.isArray(out) ? out : [];
+  } catch (e) {
+    if (["invalid_json", "refused", "empty_completion", "prompt_too_large"].includes(e?.code)) {
+      if (batch.length > 1) {
+        const out = [];
+        for (const b of batch) out.push(...(await extractReceipts(sample, cats, [b])));
+        return out;
+      }
+      return [{ id: batch[0].meta.id, purchase: false, reason: "AIで読み取れませんでした" }];
+    }
+    throw e;
+  }
+}
+
 async function readReceipts(mcp, sample, since, seen, summary, touchedMonths) {
   const metas = [];
   let pageToken;
@@ -646,9 +669,8 @@ async function readReceipts(mcp, sample, since, seen, summary, touchedMonths) {
       const received = dt && !isNaN(dt) ? D.fmt(D.ymd(dt.getFullYear(), dt.getMonth() + 1, dt.getDate())) : D.fmt(D.today());
       batch.push({ meta: m, received, text: trimBody(full?.plaintextBody || m.snippet || "") });
     }
-    const input = RECEIPT_PROMPT(cats) + "\n\n" + batch.map((b) => `=== メールID: ${b.meta.id}\n受信日: ${b.received}\n送信元: ${b.meta.sender}\n件名: ${b.meta.subject}\n本文:\n${b.text}`).join("\n\n");
-    const out = await sample.json(input, { modelTier: "default", cache: false });
-    const byId = Object.fromEntries((Array.isArray(out) ? out : []).filter((r) => r && r.id).map((r) => [String(r.id), r]));
+    const out = await extractReceipts(sample, cats, batch);
+    const byId = Object.fromEntries(out.filter((r) => r && r.id).map((r) => [String(r.id), r]));
     for (const b of batch) {
       const m = b.meta, r = byId[m.id];
       const base = { id: m.id, date: b.received, sender: m.sender || "", subject: m.subject || "" };
@@ -660,9 +682,10 @@ async function readReceipts(mcp, sample, since, seen, summary, touchedMonths) {
       }
       const date = /^\d{4}-\d{2}-\d{2}$/.test(r.date || "") && Math.abs(D.parse(r.date) - D.parse(b.received)) <= 62 ? r.date : b.received;
       const type = r.refund ? "income" : "expense";
-      // カード下 4 桁が口座に登録したものと一致すれば、そのカードの利用にする
+      // カード下 4 桁が分かれば、登録したカードと一致したときだけそのカードの利用にする
+      // （一致しなければ別のカードなので口座なし。下 4 桁が書いていなければ既定の支払い方法）
       const last4 = String(r.card_last4 || "").replace(/\D/g, "").slice(-4);
-      const accountId = (last4 && cards.find((c) => String(c.card_last4 || "") === last4)?.id) || defaultAccount;
+      const accountId = last4.length === 4 ? (cards.find((c) => String(c.card_last4 || "") === last4)?.id || null) : defaultAccount;
       const merchant = String(r.merchant || m.sender || "").slice(0, 40);
       const description = r.item ? `${merchant}（${String(r.item).slice(0, 24)}）` : merchant;
       await ensureMonths([D.ym(date)]);
