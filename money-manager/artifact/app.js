@@ -1154,7 +1154,7 @@ function ring(ratio, status) {
     <circle class="val" cx="38" cy="38" r="${r}" fill="none" stroke-width="8" stroke-linecap="round" stroke-dasharray="${c * v} ${c}" transform="rotate(-90 38 38)"/>
     <text x="38" y="35" text-anchor="middle" class="face">${STATUS_FACE[status] || ""}</text><text x="38" y="53" text-anchor="middle">${Math.round(v * 100)}%</text></svg>`;
 }
-function donut(slices, total, c1 = "総資産") {
+function donut(slices, total, c1 = "総資産", c3 = "") {
   const R = 80, r = 54, cx = 85, cy = 85;
   let a0 = -Math.PI / 2, out = "";
   const sum = slices.reduce((s, x) => s + x.value, 0) || 1;
@@ -1164,7 +1164,7 @@ function donut(slices, total, c1 = "総資産") {
     out += `<path d="M${p(R, a0)} A${R},${R} 0 ${large} 1 ${p(R, a1)} L${p(r, a1)} A${r},${r} 0 ${large} 0 ${p(r, a0)} Z" fill="var(${sl.color})" data-tip="${esc(sl.tip)}" data-sw="${sl.color}"/>`;
     a0 = a1;
   }
-  return `<svg class="donut" viewBox="0 0 170 170" role="img" aria-label="総資産 ${yen(total)} の内訳">${out}<text class="c1" x="85" y="78" text-anchor="middle">${c1}</text><text class="c2" x="85" y="100" text-anchor="middle">${total >= 100000 ? man(total) : yen(total)}</text></svg>`;
+  return `<svg class="donut" viewBox="0 0 170 170" role="img" aria-label="総資産 ${yen(total)} の内訳">${out}<text class="c1" x="85" y="${c3 ? 72 : 78}" text-anchor="middle">${c1}</text><text class="c2" x="85" y="${c3 ? 94 : 100}" text-anchor="middle">${Math.abs(total) >= 100000 ? man(total) : yen(total)}</text>${c3 ? `<text class="c1" x="85" y="113" text-anchor="middle">${c3}</text>` : ""}</svg>`;
 }
 const ASSET_GROUPS = [["deposit", "預金・現金", "--series-1", ["bank", "cash"]], ["invest", "投資（NISA・特定口座）", "--series-2", ["securities", "nisa"]],
   ["pension", "年金（iDeCo・企業型DC）", "--series-3", ["ideco", "dc"]], ["emoney", "電子マネー", "--series-4", ["emoney"]], ["other", "ポイント・その他", "--series-5", ["other"]]];
@@ -1199,6 +1199,13 @@ $$("dialog.form-sheet").forEach((d) => {
   d.querySelector("form")?.addEventListener("reset", () => d.close());
 });
 
+document.addEventListener("click", (e) => {
+  const v = e.target.closest?.("[data-spend-view]")?.dataset.spendView;
+  if (!v) return;
+  try { localStorage.setItem("spendView", v); } catch {}
+  render();
+});
+
 // 純資産のカードを押すと総資産の内訳をポップアップで出す
 let lastAssets = "";
 function openAssets() { $("#asset-dialog-body").innerHTML = lastAssets; fillIcons(); $("#asset-dialog").showModal(); }
@@ -1214,10 +1221,14 @@ function renderDashboard() {
   $("#onboarding").hidden = !(b.income === 0 || !d.accounts.some((a) => a.kind !== "card" && Number(a.balance)));
   $("#onboarding").innerHTML = `はじめに <a href="#" data-goto="settings">設定</a> で手取り月収を、<a href="#" data-goto="assets">口座・資産</a> で預金・NISA・iDeCo の残高を入れてください。${d.accounts.some((a) => a.kind === "card") ? "登録済みのカードはそのまま使えます。" : ""}`;
 
-  $("#hero-month").innerHTML = `<div class="hero-top"><div><div class="label">今月あと使えるお金 <span class="status ${b.status}">${STATUS_TEXT[b.status]}</span></div>
-    <div class="value ${b.remaining < 0 ? "neg" : ""}">${yen(b.remaining)}</div></div>${ring(b.variable_budget > 0 ? b.remaining / b.variable_budget : 0, b.status)}</div>
-    <div class="calc">予算 ${yen(b.variable_budget)} − 使った ${yen(b.spent)}</div>
-    <div class="sub">${md(b.period.end)}の締めまで あと${b.period.days_left}日</div>`;
+  let spendView = "budget";
+  try { spendView = localStorage.getItem("spendView") || "budget"; } catch {}
+  $("#hero-month").innerHTML = `<div class="row-between wrap spend-head"><div><div class="label">今月あと使えるお金 <span class="status ${b.status}">${STATUS_TEXT[b.status]}</span></div>
+      <div class="value big ${b.remaining < 0 ? "neg" : ""}">${yen(b.remaining)}</div>
+      <div class="sub">予算 ${yen(b.variable_budget)} のうち ${yen(b.spent)}（${pct(b.spent / Math.max(1, b.variable_budget))}）使用・${md(b.period.end)}の締めまで あと${b.period.days_left}日</div></div>
+    <div class="seg small-seg" role="group" aria-label="グラフの表示">
+      <button type="button" data-spend-view="budget" aria-pressed="${spendView === "budget"}">予算に対して</button>
+      <button type="button" data-spend-view="spent" aria-pressed="${spendView === "spent"}">使った内訳</button></div></div>`;
   $("#hero-today").innerHTML = `<div class="hero-top"><div><div class="label">今日あと使えるお金</div>
     <div class="value ${b.today_remaining < 0 ? "neg" : ""}">${yen(b.today_remaining)}</div></div><span class="badge">${ico("sun")}</span></div>
     <div class="calc">${yen(b.remaining + b.today_spent)} ÷ ${b.period.days_left}日${b.today_spent ? ` − 今日 ${yen(b.today_spent)}` : ""}</div>
@@ -1250,10 +1261,16 @@ function renderDashboard() {
   const slices = []; let other = 0;
   for (const c of cats) if (c.spent > 0) { if (CAT_SLOT[c.category]) slices.push({ value: c.spent, color: catColor(c.category).slice(4, -1), tip: `${c.category}|${yen(c.spent)}（${pct(c.spent / gross)}）` }); else other += c.spent; }
   if (other) slices.push({ value: other, color: "--series-other", tip: `その他のカテゴリ|${yen(other)}（${pct(other / gross)}）` });
-  $("#cat-chart").innerHTML = gross > 0 ? `<div class="donut-wrap spend">${donut(slices, b.spent, "使った")}
+  const byBudget = spendView === "budget" && b.variable_budget > 0;
+  const restB = Math.max(0, b.remaining);
+  if (byBudget && restB) slices.push({ value: restB, color: "--track", tip: `あと使える|${yen(restB)}（予算の ${pct(restB / b.variable_budget)}）`, track: true });
+  const share = (v) => pct(v / Math.max(1, byBudget ? b.variable_budget : gross));
+  $("#cat-chart").innerHTML = gross > 0 || byBudget ? `<div class="donut-wrap spend">${byBudget ? donut(slices, b.remaining, "あと使える", `予算 ${man(b.variable_budget)}`) : donut(slices, b.spent, "使った")}
     <div class="cat-list">${cats.filter((c) => c.spent > 0).map((c) => `<div class="cat-row" data-tip="${esc(c.category)}|${yen(c.spent)}（${pct(c.spent / gross)}）">${catIcon(c.category)}
-      <span class="nm">${esc(c.category)}</span><span class="bar"><span style="width:${(c.spent / cats[0].spent) * 100}%;background:${catColor(c.category)}"></span></span><span class="amt">${yen(c.spent)}</span><span class="pct">${pct(c.spent / gross)}</span></div>`).join("")}
-      ${b.reimbursed ? `<div class="cat-row muted small"><span></span><span class="nm">立替の精算（受け取り）</span><span></span><span class="amt">−${yen(b.reimbursed)}</span><span></span></div>` : ""}</div></div>`
+      <span class="nm">${esc(c.category)}</span><span class="bar"><span style="width:${(c.spent / cats[0].spent) * 100}%;background:${catColor(c.category)}"></span></span><span class="amt">${yen(c.spent)}</span><span class="pct">${share(c.spent)}</span></div>`).join("")}
+      ${b.reimbursed ? `<div class="cat-row muted small"><span></span><span class="nm">立替の精算（受け取り）</span><span></span><span class="amt">−${yen(b.reimbursed)}</span><span></span></div>` : ""}
+      ${byBudget ? `<div class="cat-row rest"><span class="cat-ico" style="--c:var(--track)" aria-hidden="true">✓</span><span class="nm">あと使える</span><span class="bar"><span style="width:${Math.min(100, (restB / Math.max(1, cats[0]?.spent || restB)) * 100)}%;background:var(--track-ink)"></span></span><span class="amt">${yen(restB)}</span><span class="pct">${share(restB)}</span></div>` : ""}
+      <div class="cat-foot"><a href="#" class="small" data-goto="transactions">明細を見る ›</a></div></div></div>`
     : `<p class="muted">今期の支出はまだありません。右下の ＋ から記録するか、カードの CSV を取り込んでください。</p>`;
 
   $("#cards-list").innerHTML = d.cards.length ? `<div class="list">${d.cards.map((c) => `

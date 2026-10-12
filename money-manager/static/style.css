@@ -19,6 +19,8 @@
   --series-7: #6250d6;
   --series-8: #e34948;
   --series-other: #a3a29b;
+  --track: #e4e2dc;
+  --track-ink: #b9b7af;
   --good: #0ca30c;
   --good-ink: #006300;
   --warning: #fab219;
@@ -45,7 +47,7 @@
     --series-4: #c98500;
     --series-5: #d55181;
     --accent-soft: #1d2b3d;
-    --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-other: #6b6a64;
+    --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-other: #6b6a64; --track: #33332f; --track-ink: #5a5954;
     --good-ink: #4cc44c;
     --warning-ink: #fab219;
     --critical-ink: #ef7272;
@@ -56,7 +58,7 @@
   color-scheme: dark;
   --bg: #111110; --surface: #1a1a19; --surface-2: #242422; --border: #33332f;
   --text: #f0efec; --text-2: #c3c2b7; --muted: #94938c; --accent: #3987e5;
-  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181; --accent-soft: #1d2b3d; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-other: #6b6a64;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181; --accent-soft: #1d2b3d; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-other: #6b6a64; --track: #33332f; --track-ink: #5a5954;
   --good-ink: #4cc44c; --warning-ink: #fab219; --critical-ink: #ef7272; --grid: #2c2c29;
 }
 
@@ -376,3 +378,17 @@ dialog.form-sheet .form h2 { margin-right: 40px; font-size: 17px; color: var(--t
 .tx-list { gap: 6px; }
 .tx-row { border-bottom: 0; border-radius: 12px; padding: 9px 10px; background: color-mix(in srgb, var(--c) 11%, var(--surface)); }
 .tx-row .cat-ico { background: var(--surface); }
+
+/* 今月のお金（あと使える＋内訳） */
+.spend-head { align-items: flex-start; gap: 12px; margin-bottom: 6px; }
+.spend-head .label { color: var(--text-2); font-size: 13px; }
+.spend-head .value.big { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; margin: 2px 0; }
+.spend-head .value.neg { color: var(--critical-ink); }
+.spend-head .sub { color: var(--muted); font-size: 12.5px; }
+.small-seg { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 3px; gap: 2px; }
+.small-seg button { border: 0; background: transparent; color: var(--text-2); font-size: 12.5px; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+.small-seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.cat-row.rest .nm, .cat-row.rest .amt { color: var(--text-2); }
+.cat-foot { text-align: right; margin-top: 4px; }
+@media (max-width: 600px) { .spend-head .value.big { font-size: 30px; } }
+@media (max-width: 600px) { .cat-row { grid-template-columns: 30px minmax(96px, 1.6fr) minmax(24px, 1fr) 78px 32px; gap: 6px; } }
