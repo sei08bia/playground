@@ -1378,7 +1378,8 @@ function renderTxTable() {
   const WD = "月火水木金土日";
   $("#tx-table").innerHTML = rows.length ? Object.entries(byDay).map(([d, ts]) => `<div class="day-head">${md(d)}（${WD[D.weekday(D.parse(d))]}）</div>
     <div class="tx-list">${ts.map((t) => { const a = accounts().find((x) => x.id === t.account_id) || S.accounts.items.find((x) => x.id === t.account_id);
-      return `<div class="tx-row">${t.type === "transfer" ? '<span class="cat-ico" style="--c:var(--muted)" aria-hidden="true">⇄</span>' : t.type === "income" ? '<span class="cat-ico" style="--c:var(--good)" aria-hidden="true">💰</span>' : merchantBadge(t.description) || catIcon(t.category)}
+      const rowC = t.type === "transfer" ? "var(--muted)" : t.type === "income" ? "var(--good)" : catColor(t.category);
+      return `<div class="tx-row" style="--c:${rowC}">${t.type === "transfer" ? '<span class="cat-ico" style="--c:var(--muted)" aria-hidden="true">⇄</span>' : t.type === "income" ? '<span class="cat-ico" style="--c:var(--good)" aria-hidden="true">💰</span>' : merchantBadge(t.description) || catIcon(t.category)}
       <div class="tx-main"><div class="tx-desc">${esc(t.description)}</div>
         <div class="tx-meta">${esc(t.category)}${a ? `<span class="sep">·</span>${accDot(a)}` : ""}${t.recurring_id ? `<span class="tag">固定費</span>` : ""}${t.own_share != null && t.own_share < t.amount ? `<span class="tag">自分の分 ${yen(t.own_share)}</span>` : ""}${t.source === "gmail" ? '<span class="tag">メール</span>' : ""}</div>
         ${t.memo ? `<div class="tx-memo">${esc(t.memo)}</div>` : ""}</div>

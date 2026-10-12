@@ -371,3 +371,8 @@ dialog.form-sheet .form h2 { margin-right: 40px; font-size: 17px; color: var(--t
 #tab-transactions .row-between { align-items: flex-start; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; max-width: 520px; }
 .filters > * { flex: 1 1 130px; min-width: 0; }
+
+/* 明細の行はカテゴリの色を薄く敷く */
+.tx-list { gap: 6px; }
+.tx-row { border-bottom: 0; border-radius: 12px; padding: 9px 10px; background: color-mix(in srgb, var(--c) 11%, var(--surface)); }
+.tx-row .cat-ico { background: var(--surface); }
