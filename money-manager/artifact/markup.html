@@ -84,6 +84,8 @@
         <label class="check" for="gmail-auto"><input type="checkbox" id="gmail-auto" name="gmail_auto"> ページを開いたら自動で取り込む</label>
         <label for="gmail-interval">間隔（分）<input type="number" id="gmail-interval" name="gmail_interval_min" min="5" max="1440"></label>
         <label for="gmail-lookback">さかのぼる日数<input type="number" id="gmail-lookback" name="gmail_lookback_days" min="1" max="365"></label>
+        <label class="check" for="receipts-enabled"><input type="checkbox" id="receipts-enabled" name="receipts_enabled"> お店からの購入メールも AI で読む</label>
+        <label for="receipt-account">購入メールの支払い方法<select id="receipt-account" name="receipt_account_id" class="account-select"></select></label>
         <button type="submit">保存</button>
       </form>
       <details class="small">
@@ -92,8 +94,9 @@
         <ul>
           <li><b>ご請求金額のご案内</b>（楽天カードなど）→ カードの次回引き落とし額を確定額で表示</li>
           <li><b>ご利用のお知らせ</b>（三井住友・JCB・エポス・PayPayカードなど、1 回ごとの利用通知）→ 明細として追加。あとで同じ利用を CSV で取り込むと 1 件にまとまります</li>
+          <li><b>お店からの購入メール</b>（Amazon・チケット・交通・サブスクの領収書など）→ Claude が日付・金額・お店・カテゴリを読み取って明細に追加。お店で直接払った分はメールが来ないので、全部はそろいません</li>
         </ul>
-        <p>楽天カードの 1 回ごとの利用通知はアプリにしか届かないため、明細は楽天e-NAVI の CSV で取り込んでください。</p>
+        <p>楽天カードの 1 回ごとの利用通知はアプリにしか届かないため、すべての内訳は楽天e-NAVI の CSV で取り込んでください。CSV と購入メールの同じ利用は 1 件にまとまります。</p>
       </details>
       <h3>取り込み履歴</h3>
       <div class="table-wrap"><table id="gmail-log"></table></div>

@@ -92,7 +92,7 @@ function fillForm(form, data) {
 // ================================================================== store
 // app/<name> は 1 文書ずつ（{items:[...]} など）、明細は月ごとに tx/<YYYY-MM>
 const DEFAULT_SETTINGS = { monthly_income: 0, cycle_start_day: 1, savings_goal: 0, category_budgets: {}, emergency_fund_months: 6,
-  gmail_auto: true, gmail_interval_min: 60, gmail_lookback_days: 45 };
+  gmail_auto: true, gmail_interval_min: 60, gmail_lookback_days: 45, receipts_enabled: true, receipt_account_id: "" };
 const APP_DOCS = { settings: () => ({ ...DEFAULT_SETTINGS }), accounts: () => ({ items: [] }), recurring: () => ({ items: [] }),
   wishlist: () => ({ items: [] }), bills: () => ({ items: [] }), mail: () => ({ seen: [], log: [], lastSync: null }), advice: () => ({ log: [] }) };
 const S = { tx: {}, loaded: new Set(), db: null };
@@ -369,6 +369,9 @@ const CATEGORY_RULES = [
   ["趣味・娯楽", ["映画", "TOHO", "書店", "紀伊國屋", "STEAM", "NINTENDO", "任天堂", "PLAYSTATION", "ゲーム"]],
   ["衣服・美容", ["ユニクロ", "UNIQLO", "ZARA", "H&M", "美容", "ヘア", "サロン"]],
 ];
+const EXTRA_CATEGORIES = ["旅行", "住居", "保険", "教育", "交際費", "特別な支出", "その他"];
+const ALL_CATEGORIES = () => [...CATEGORY_RULES.map(([c]) => c), ...EXTRA_CATEGORIES];
+
 function guessCategory(desc) {
   const t = String(desc || "").normalize("NFKC").toUpperCase();
   for (const [cat, words] of CATEGORY_RULES) if (words.some((w) => t.includes(w.toUpperCase()))) return cat;
@@ -582,6 +585,105 @@ function logMail(entry) {
   if (entry.status !== "no_account" && !S.mail.seen.includes(entry.id)) S.mail.seen = [...S.mail.seen, entry.id].slice(-3000);
 }
 
+// ------------------------------------------------------------------ お店からの購入メール（AI で読む）
+// カード会社が 1 回ごとの利用通知を送らない場合の補完。Amazon・チケット・交通・サブスクなどの
+// 注文確認や領収書メールから、支払った日・金額・お店・カテゴリを Claude に読み取らせる。
+const RECEIPT_EXCLUDE = [...Object.keys(ISSUERS), "moneyforward.com", "rakuten-sec.co.jp", "smarthr.jp", "rakuten-bank.co.jp", "jp-bank.japanpost.jp"];
+const RECEIPT_SUBJECT = /(注文|領収|レシート|receipt|購入|決済|支払|ご利用|料金|請求|予約|申込|チケット|invoice|payment|お買い上げ|ご契約)/i;
+const RECEIPT_IGNORE = /(キャンペーン|セール|sale|クーポン|ポイント(進呈|獲得|プレゼント)|ニュース|プレゼント|【PR】|（PR）|\(PR\)|アンケート|ログイン|認証|パスワード|お得|おトク|最大|%OFF|％OFF|無料体験|おすすめ|新着|メンテナンス|発送済み|発送のお知らせ|お届け予定|到着予定|配送|購入失敗|リマインド|搭乗前|事前案内|登録完了|会員登録)/i;
+const RECEIPT_BATCH = 6, RECEIPT_MAX_PER_SYNC = 36;
+
+function receiptQuery(since) {
+  return `after:${since} -category:promotions -category:social -in:sent -from:(${RECEIPT_EXCLUDE.join(" OR ")}) ` +
+    `(subject:(注文 OR 領収 OR 購入 OR 決済 OR 支払 OR 料金 OR 請求 OR receipt OR 予約 OR 申込 OR チケット OR invoice) OR 合計金額 OR お支払い金額 OR お支払金額 OR "Amount paid")`;
+}
+
+function receiptCandidate(m) {
+  const subj = String(m.subject || "").normalize("NFKC");
+  return !issuerFor(m.sender) && RECEIPT_SUBJECT.test(subj) && !RECEIPT_IGNORE.test(subj);
+}
+
+function trimBody(text) {
+  return String(text || "").normalize("NFKC")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[ \t\u3000]+/g, " ")
+    .replace(/\n\s*\n+/g, "\n")
+    .slice(0, 2500);
+}
+
+const RECEIPT_PROMPT = (cats) => `あなたは家計簿アプリのレシート読み取り係です。下のメールそれぞれについて、ユーザーが実際にお金を支払った（支払いが確定した）記録かを判定してください。
+JSON 配列だけを返します。メール 1 通につき 1 要素:
+{"id": "メールID", "purchase": true, "date": "YYYY-MM-DD", "amount": 1234, "merchant": "お店・サービス名（短く）", "item": "買ったもの（20字以内）", "category": "カテゴリ", "card_last4": "9746", "refund": false, "reason": ""}
+- purchase を true にするもの: 注文確定、決済完了、領収書、利用料金の確定、チケット購入完了、スマート支払い完了、サブスクの請求。
+- purchase を false にするもの: 広告、支払いがまだの予約受付や現地払い、配送や発送の連絡、同じ注文の重複連絡、購入失敗、ポイントだけの連絡、給与や入金、投資の積立。false のときは reason に理由を 15 字以内で書き、ほかの項目は省略してよい。
+- amount は税・手数料込みの支払総額を円の整数で。外貨の場合はメールに書かれた円換算額（Charged ¥… など）を使い、円換算額がなければ purchase を false にする。
+- date は支払日・利用日。分からなければメールの受信日。
+- category は次から 1 つ: ${cats.join("、")}
+- card_last4 はカード番号の下 4 桁が書いてあるときだけ。返金・取消の連絡なら refund を true。`;
+
+async function readReceipts(mcp, sample, since, seen, summary, touchedMonths) {
+  const metas = [];
+  let pageToken;
+  for (let page = 0; page < 3; page++) {
+    const res = await callGmail(mcp, "search_threads", { query: receiptQuery(since), pageSize: 50, view: "THREAD_VIEW_MINIMAL", ...(pageToken ? { pageToken } : {}) });
+    for (const th of res?.threads || []) for (const m of th.messages || []) metas.push(m);
+    pageToken = res?.nextPageToken;
+    if (!pageToken) break;
+  }
+  // 古い順に処理する（上限で打ち切っても、残りは次回の取り込みで読む）
+  const todo = metas.filter((m) => m.id && !seen.has(m.id) && receiptCandidate(m)).reverse().slice(0, RECEIPT_MAX_PER_SYNC);
+  if (!todo.length) return 0;
+  const st = settings();
+  const cards = accounts().filter((a) => a.kind === "card");
+  const defaultAccount = st.receipt_account_id && accounts().some((a) => a.id === st.receipt_account_id) ? st.receipt_account_id : cards.length === 1 ? cards[0].id : null;
+  const cats = ALL_CATEGORIES();
+  let done = 0;
+  for (let i = 0; i < todo.length; i += RECEIPT_BATCH) {
+    const batch = [];
+    for (const m of todo.slice(i, i + RECEIPT_BATCH)) {
+      const full = await callGmail(mcp, "get_message", { messageId: m.id, messageFormat: "PLAIN_TEXT" });
+      const dt = m.date ? new Date(m.date) : null;
+      const received = dt && !isNaN(dt) ? D.fmt(D.ymd(dt.getFullYear(), dt.getMonth() + 1, dt.getDate())) : D.fmt(D.today());
+      batch.push({ meta: m, received, text: trimBody(full?.plaintextBody || m.snippet || "") });
+    }
+    const input = RECEIPT_PROMPT(cats) + "\n\n" + batch.map((b) => `=== メールID: ${b.meta.id}\n受信日: ${b.received}\n送信元: ${b.meta.sender}\n件名: ${b.meta.subject}\n本文:\n${b.text}`).join("\n\n");
+    const out = await sample.json(input, { modelTier: "default", cache: false });
+    const byId = Object.fromEntries((Array.isArray(out) ? out : []).filter((r) => r && r.id).map((r) => [String(r.id), r]));
+    for (const b of batch) {
+      const m = b.meta, r = byId[m.id];
+      const base = { id: m.id, date: b.received, sender: m.sender || "", subject: m.subject || "" };
+      const amount = Math.round(Number(r?.amount));
+      if (!r || !r.purchase || !(amount > 0)) {
+        summary.ignored++;
+        logMail({ ...base, status: "ignored", detail: r?.reason ? `AI: ${String(r.reason).slice(0, 30)}` : "支払いの記録ではありません" });
+        continue;
+      }
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(r.date || "") && Math.abs(D.parse(r.date) - D.parse(b.received)) <= 62 ? r.date : b.received;
+      const type = r.refund ? "income" : "expense";
+      // カード下 4 桁が口座に登録したものと一致すれば、そのカードの利用にする
+      const last4 = String(r.card_last4 || "").replace(/\D/g, "").slice(-4);
+      const accountId = (last4 && cards.find((c) => String(c.card_last4 || "") === last4)?.id) || defaultAccount;
+      const merchant = String(r.merchant || m.sender || "").slice(0, 40);
+      const description = r.item ? `${merchant}（${String(r.item).slice(0, 24)}）` : merchant;
+      await ensureMonths([D.ym(date)]);
+      const dup = allTx().find((t) => t.amount === amount && t.type === type && (t.account_id || null) === accountId && t.mail_id !== m.id && Math.abs(D.parse(t.date) - D.parse(date)) <= 3);
+      if (dup) {
+        summary.merged++;
+        logMail({ ...base, status: "merged", detail: `既存の明細と同じ: ${dup.date} ${dup.description}` });
+        continue;
+      }
+      const category = type === "income" ? "収入・返金" : cats.includes(r.category) ? r.category : guessCategory(description);
+      touchedMonths.add(addTx({ date, amount, type, category, account_id: accountId, description,
+        memo: r.card_last4 ? `カード下4桁 ${String(r.card_last4).slice(-4)}` : "", recurring_id: type === "expense" ? matchRecurring(description) : null,
+        source: "receipt", mail_id: m.id }));
+      summary.receipts++;
+      logMail({ ...base, status: "receipt", detail: `${description} ${amount.toLocaleString()}円（${category}）` });
+    }
+    done += batch.length;
+  }
+  return done;
+}
+
 async function syncGmail({ silent = false } = {}) {
   if (syncing) return;
   const mcp = await claude.use("mcp");
@@ -591,7 +693,7 @@ async function syncGmail({ silent = false } = {}) {
   const st = settings();
   const since = D.fmt(D.today() - (Number(st.gmail_lookback_days) || 45)).replace(/-/g, "/");
   const query = "{" + Object.keys(ISSUERS).map((d) => "from:" + d).join(" ") + "} after:" + since;
-  const summary = { checked: 0, imported: 0, merged: 0, bills: 0, ignored: 0, no_account: 0 };
+  const summary = { checked: 0, imported: 0, merged: 0, bills: 0, ignored: 0, no_account: 0, receipts: 0 };
   const touchedMonths = new Set();
   const at = new Date().toISOString();
   try {
@@ -636,8 +738,27 @@ async function syncGmail({ silent = false } = {}) {
       summary.imported++;
       logMail({ ...base, status: "imported", detail: accountId ? "" : "カード未登録のため口座なしで記録" });
     }
-    S.mail.lastSync = { at, ok: true, summary };
-    if (!silent || summary.imported || summary.bills) toast(`明細 ${summary.imported} 件・請求額 ${summary.bills} 件を取り込みました`);
+    // お店からの購入メール。AI の利用許可が要るので、自動取り込みでは許可済みのときだけ
+    let receiptNote = "";
+    if (st.receipts_enabled !== false) {
+      const sample = await claude.use("sample");
+      let allowed = !!sample;
+      if (sample && silent) {
+        const perms = await claude.use("permissions").catch(() => null);
+        allowed = (perms ? await perms.state("sample").catch(() => "unavailable") : "unavailable") === "granted";
+      }
+      if (allowed) {
+        try { await readReceipts(mcp, sample, since, new Set(S.mail.seen), summary, touchedMonths); }
+        catch (e) {
+          receiptNote = e?.code === "not_granted" ? "（購入メールの読み取りは AI の利用が許可されていないため休止中）"
+            : e?.code === "rate_limited" ? "（AI の利用上限のため、購入メールの残りは次回読みます）"
+            : e?.code ? `（購入メールの読み取りに失敗: ${e.code}）` : `（購入メールの読み取りに失敗: ${e?.message || e}）`;
+        }
+      }
+    }
+    S.mail.lastSync = { at, ok: true, summary, note: receiptNote };
+    if (!silent || summary.imported || summary.bills || summary.receipts)
+      toast(`明細 ${summary.imported + summary.receipts} 件・請求額 ${summary.bills} 件を取り込みました${receiptNote}`);
   } catch (e) {
     S.mail.lastSync = { at, ok: false, error: mailErrorText(e) };
     if (!silent) toast(mailErrorText(e));
@@ -748,7 +869,7 @@ function renderRefs() {
   $$("select.bank-select").forEach((s) => { const v = s.value; s.innerHTML = bankOpts; s.value = v; });
   const recOpts = `<option value="">なし（変動費）</option>` + recurring().filter((r) => r.active !== false).map((r) => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join("");
   $$("select.recurring-select").forEach((s) => { const v = s.value; s.innerHTML = recOpts; s.value = v; });
-  const cats = new Set([...CATEGORY_RULES.map(([c]) => c), "住居", "保険", "教育", "交際費", "特別な支出", "その他", "収入", "未分類", ...allTx().map((t) => t.category), ...Object.keys(settings().category_budgets || {})]);
+  const cats = new Set([...ALL_CATEGORIES(), "収入", "未分類", ...allTx().map((t) => t.category), ...Object.keys(settings().category_budgets || {})]);
   $("#category-list").innerHTML = [...cats].map((c) => `<option value="${esc(c)}">`).join("");
 }
 
@@ -900,7 +1021,7 @@ function renderTxTable() {
   const inc = rows.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   $("#tx-total").textContent = `${rows.length} 件／支出 ${yen(exp)}／収入 ${yen(inc)}`;
   $("#tx-table").innerHTML = rows.length ? `<thead><tr><th>日付</th><th>内容</th><th>カテゴリ</th><th>口座</th><th class="num">金額</th><th></th></tr></thead><tbody>` +
-    rows.map((t) => `<tr><td>${md(t.date)}</td><td class="desc">${esc(t.description)}${t.source === "gmail" ? '<span class="tag">メール</span>' : ""}${t.recurring_id ? `<span class="tag">固定費: ${esc(recName(t.recurring_id))}</span>` : ""}${t.memo ? `<div class="muted small">${esc(t.memo)}</div>` : ""}</td>
+    rows.map((t) => `<tr><td>${md(t.date)}</td><td class="desc">${esc(t.description)}${t.source === "gmail" ? '<span class="tag">メール</span>' : t.source === "receipt" ? '<span class="tag">購入メール</span>' : ""}${t.recurring_id ? `<span class="tag">固定費: ${esc(recName(t.recurring_id))}</span>` : ""}${t.memo ? `<div class="muted small">${esc(t.memo)}</div>` : ""}</td>
       <td>${esc(t.category)}</td><td>${esc(accName(t.account_id))}</td><td class="num">${t.type === "income" ? "+" : t.type === "transfer" ? "⇄ " : "−"}${yen(t.amount)}</td>
       <td><button class="link-btn" data-edit-tx="${esc(t.id)}" type="button">編集</button><button class="link-btn danger" data-del-tx="${esc(t.id)}" type="button">${pendingDelete === t.id ? "本当に削除" : "削除"}</button></td></tr>`).join("") + "</tbody>"
     : `<tbody><tr><td class="muted">この月の明細はありません。上のフォームで記録するか、カードの CSV を取り込んでください。</td></tr></tbody>`;
@@ -971,7 +1092,7 @@ async function uploadCsv(dryRun) {
     const h = `${accountId}|${key}|${(occ[key] = (occ[key] || 0) + 1) - 1}`;
     if (hashes.has(h)) { skipped++; continue; }
     // Gmail の利用通知で先に入っていた同じ利用は、CSV の内容で置き換える
-    const dup = allTx().find((t) => t.source === "gmail" && t.amount === it.amount && t.type === it.type && (t.account_id || null) === accountId && Math.abs(D.parse(t.date) - D.parse(it.date)) <= 3);
+    const dup = allTx().find((t) => (t.source === "gmail" || t.source === "receipt") && t.amount === it.amount && t.type === it.type && (t.account_id || null) === accountId && Math.abs(D.parse(t.date) - D.parse(it.date)) <= 3);
     if (dup) {
       merged++;
       if (!dryRun) {
@@ -997,17 +1118,20 @@ $("#csv-preview").addEventListener("click", () => uploadCsv(true));
 csvForm.addEventListener("submit", (e) => { e.preventDefault(); uploadCsv(false); });
 
 // ------------------------------------------------------------------ Gmail パネル
-const GMAIL_STATUS = { imported: "明細に追加", merged: "既存の明細と同じ", bill: "請求額を反映", no_account: "カード未登録", ignored: "対象外" };
+const GMAIL_STATUS = { imported: "明細に追加", receipt: "購入メールから追加", merged: "既存の明細と同じ", bill: "請求額を反映", no_account: "カード未登録", ignored: "対象外" };
 function renderGmail() {
   const last = S.mail.lastSync, sum = last?.summary, st = settings();
   $("#gmail-status").innerHTML = syncing ? `<p>取り込み中です…</p>` : last
     ? `<p class="${last.ok ? "muted" : "neg"}">前回 ${esc(new Date(last.at).toLocaleString("ja-JP"))}：${last.ok
-      ? `メール ${sum.checked} 件を確認、明細 ${sum.imported} 件追加・請求額 ${sum.bills} 件反映${sum.merged ? `・重複 ${sum.merged} 件` : ""}${sum.no_account ? `・<b>カード未登録 ${sum.no_account} 件</b>` : ""}`
+      ? `明細 ${sum.imported + (sum.receipts || 0)} 件追加（うち購入メールから ${sum.receipts || 0} 件）・請求額 ${sum.bills} 件反映${sum.merged ? `・重複 ${sum.merged} 件` : ""}${sum.no_account ? `・<b>カード未登録 ${sum.no_account} 件</b>` : ""}${last.note ? ` ${esc(last.note)}` : ""}`
       : esc(last.error)}</p>`
     : `<p class="muted">まだ取り込んでいません。「今すぐ取り込む」を押すと、Gmail の利用を許可する確認が出ます。</p>`;
   $("#gmail-sync").disabled = syncing;
   const f = $("#gmail-settings");
-  if (document.activeElement?.form !== f) { f.gmail_auto.checked = !!st.gmail_auto; f.gmail_interval_min.value = st.gmail_interval_min; f.gmail_lookback_days.value = st.gmail_lookback_days; }
+  if (document.activeElement?.form !== f) {
+    f.gmail_auto.checked = !!st.gmail_auto; f.gmail_interval_min.value = st.gmail_interval_min; f.gmail_lookback_days.value = st.gmail_lookback_days;
+    f.receipts_enabled.checked = st.receipts_enabled !== false; f.receipt_account_id.value = st.receipt_account_id || "";
+  }
   const rows = S.mail.log.slice(0, 30);
   $("#gmail-log").innerHTML = rows.length ? `<thead><tr><th>受信</th><th>件名</th><th>結果</th></tr></thead><tbody>` +
     rows.map((r) => `<tr><td>${esc(r.date)}</td><td class="desc">${esc(r.subject)}<div class="muted small">${esc(r.sender)}</div></td><td class="desc"><span class="st-${r.status}">${GMAIL_STATUS[r.status] || r.status}</span>${r.detail ? `<div class="muted small">${esc(r.detail)}</div>` : ""}</td></tr>`).join("") + "</tbody>"
@@ -1017,7 +1141,8 @@ $("#gmail-sync").addEventListener("click", () => syncGmail());
 $("#gmail-settings").addEventListener("submit", (e) => {
   e.preventDefault();
   const f = e.target;
-  S.settings = { ...settings(), gmail_auto: f.gmail_auto.checked, gmail_interval_min: Math.max(5, Number(f.gmail_interval_min.value) || 60), gmail_lookback_days: Math.max(1, Number(f.gmail_lookback_days.value) || 45) };
+  S.settings = { ...settings(), gmail_auto: f.gmail_auto.checked, gmail_interval_min: Math.max(5, Number(f.gmail_interval_min.value) || 60), gmail_lookback_days: Math.max(1, Number(f.gmail_lookback_days.value) || 45),
+    receipts_enabled: f.receipts_enabled.checked, receipt_account_id: f.receipt_account_id.value || "" };
   save("settings");
   toast("保存しました");
 });
