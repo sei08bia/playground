@@ -614,7 +614,7 @@ function trimBody(text) {
 const RECEIPT_PROMPT = (cats) => `あなたは家計簿アプリのレシート読み取り係です。下のメールそれぞれについて、ユーザーが実際にお金を支払った（支払いが確定した）記録かを判定してください。
 JSON 配列だけを返します。メール 1 通につき 1 要素:
 {"id": "メールID", "purchase": true, "date": "YYYY-MM-DD", "amount": 1234, "merchant": "お店・サービス名（短く）", "item": "買ったもの（20字以内）", "category": "カテゴリ", "card_last4": "9746", "refund": false, "reason": ""}
-- purchase を true にするもの: 注文確定、決済完了、領収書、利用料金の確定、チケット購入完了、スマート支払い完了、サブスクの請求。
+- purchase を true にするもの: 注文確定、決済完了、領収書、利用料金の確定、チケット購入完了、スマート支払い完了、サブスクの請求。支払金額が書かれた注文確認メールも true（「発送時に契約成立」と書かれていても、注文確認の方を true にし、あとの発送連絡は重複として false）。
 - purchase を false にするもの: 広告、支払いがまだの予約受付や現地払い、配送や発送の連絡、同じ注文の重複連絡、購入失敗、ポイントだけの連絡、給与や入金、投資の積立。false のときは reason に理由を 15 字以内で書き、ほかの項目は省略してよい。
 - amount は税・手数料込みの支払総額を円の整数で。外貨の場合はメールに書かれた円換算額（Charged ¥… など）を使い、円換算額がなければ purchase を false にする。
 - date は支払日・利用日。分からなければメールの受信日。
@@ -685,7 +685,7 @@ async function readReceipts(mcp, sample, since, seen, summary, touchedMonths) {
       // カード下 4 桁が分かれば、登録したカードと一致したときだけそのカードの利用にする
       // （一致しなければ別のカードなので口座なし。下 4 桁が書いていなければ既定の支払い方法）
       const last4 = String(r.card_last4 || "").replace(/\D/g, "").slice(-4);
-      const accountId = last4.length === 4 ? (cards.find((c) => String(c.card_last4 || "") === last4)?.id || null) : defaultAccount;
+      const accountId = last4.length === 4 ? (cards.find((c) => String(c.card_last4 || "") === last4)?.id || null) : last4 ? null : defaultAccount;
       const merchant = String(r.merchant || m.sender || "").slice(0, 40);
       const description = r.item ? `${merchant}（${String(r.item).slice(0, 24)}）` : merchant;
       await ensureMonths([D.ym(date)]);
