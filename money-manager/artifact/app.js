@@ -453,8 +453,32 @@ function csvItem(date, signed, desc, cat) {
   if (type === "income" && category === "未分類") category = "収入・返金";
   return { date, amount: Math.abs(signed), type, description: desc, category };
 }
+// PayPay アプリの取引履歴 CSV。支払いと送金は支出、受け取りとチャージは振替（予算に数えない）、ポイントの増減は対象外
+// 「株式会社　リブラス - 本マグロ専門店　まぐろ壱」は店舗名、「Darts UP - 新宿東口」はブランド＋店舗にする
+const payee = (p) => { const [a, ...b] = p.split(" - "); return !b.length ? p : /株式会社|有限会社|合同会社|（株）|\(株\)/.test(a) ? b.join(" - ") : `${a} ${b.join(" ")}`; };
+function parsePayPay(rows, hi) {
+  const h = rows[hi].map(norm), col = (name) => h.indexOf(name);
+  const iD = col("取引日"), iO = h.findIndex((x) => x.startsWith("出金金額")), iI = h.findIndex((x) => x.startsWith("入金金額"));
+  const iK = col("取引内容"), iP = col("取引先"), iM = col("取引方法");
+  const out = [];
+  for (const r of rows.slice(hi + 1)) {
+    const d = parseDateStr(String(r[iD] || "").split(" ")[0]);
+    const kind = (r[iK] || "").trim(), party = (r[iP] || "").trim(), via = (r[iM] || "").trim();
+    if (!d || via.includes("ポイント") || kind.includes("ポイント")) continue;
+    const w = parseAmount(r[iO]), dep = parseAmount(r[iI]);
+    if (kind === "支払い" && w) out.push(csvItem(d, w, payee(party), null));
+    else if (kind === "送った金額" && w) out.push({ date: d, amount: w, type: "expense", description: `PayPay送金: ${party}`, category: "交際費" });
+    else if (kind === "受け取った金額" && dep) out.push({ date: d, amount: dep, type: "transfer", description: `PayPay受取: ${party}`, category: "立替の精算" });
+    else if (kind === "チャージ" && dep) out.push({ date: d, amount: dep, type: "transfer", description: `チャージ（${via.replace(/\s*\*+\d*$/, "")}）`, category: "チャージ" });
+    else if (kind.includes("返金") && dep) out.push(csvItem(d, -dep, party, null));
+  }
+  out.format = "paypay";
+  return out;
+}
 function parseCsv(buf) {
   const rows = csvRows(decodeBytes(buf));
+  const pp = rows.slice(0, 5).findIndex((r) => r.map(norm).includes("取引内容") && r.map(norm).includes("取引方法"));
+  if (pp >= 0) return parsePayPay(rows, pp);
   let hi = rows.slice(0, 30).findIndex((r) => findCol(r, DATE_COLS) != null && (findCol(r, AMOUNT_COLS) != null || findCol(r, WITHDRAW_COLS) != null));
   const out = [];
   if (hi < 0) {
@@ -1137,6 +1161,7 @@ function findMailTwin(it, accountId) {
 async function importCsv(buf, accountId, dryRun) {
   const items = parseCsv(buf);
   if (!items.length) return { items, inserted: 0, skipped: 0, merged: 0 };
+  if (items.format === "paypay" && !accountId) accountId = (accounts().find((a) => /paypay/i.test(a.name)) || {}).id || null;
   await ensureMonths(items.map((it) => D.ym(it.date)));
   const hashes = new Set(allTx().map((t) => t.h).filter(Boolean));
   // 同じ店名に前に付けた（または直した）カテゴリを引き継ぐ。新しい明細ほど優先
@@ -1211,7 +1236,7 @@ async function uploadCsv(dryRun) {
   const r = await importCsv(new Uint8Array(await file.arrayBuffer()), csvForm.account_id.value || null, dryRun);
   if (!r.items.length) { $("#csv-result").innerHTML = `<p class="neg">明細を読み取れませんでした。日付・金額・内容の列がある CSV か確認してください。</p>`; return; }
   $("#csv-result").innerHTML = `<p>${r.items.length} 件を読み取り、${dryRun ? "取り込み対象" : "取り込み"} ${r.inserted} 件／重複スキップ ${r.skipped} 件${r.merged ? `／メールで取り込み済みの明細と統合 ${r.merged} 件` : ""}${r.aiCategorized ? `／AI がカテゴリを判定 ${r.aiCategorized} 件` : ""}</p>
-    <div class="table-wrap"><table><tbody>${r.items.slice(0, 10).map((p) => `<tr><td>${p.date}</td><td class="desc">${esc(p.description)}</td><td>${esc(p.category)}</td><td class="num">${p.type === "income" ? "+" : ""}${yen(p.amount)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="table-wrap"><table><tbody>${r.items.slice(0, 10).map((p) => `<tr><td>${p.date}</td><td class="desc">${esc(p.description)}</td><td>${esc(p.category)}</td><td class="num">${p.type === "income" ? "+" : p.type === "transfer" ? "⇄ " : ""}${yen(p.amount)}</td></tr>`).join("")}</tbody></table></div>
     ${r.items.length > 10 ? `<p class="small muted">先頭 10 件を表示</p>` : ""}`;
   if (!dryRun) { toast(`${r.inserted} 件取り込みました`); if (r.items[0]) $("#tx-month").value = D.ym(r.items[0].date); render(); }
 }
