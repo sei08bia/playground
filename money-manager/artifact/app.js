@@ -1080,7 +1080,7 @@ function merchantOf(desc) {
 const merchantBadge = (desc) => { const m = merchantOf(desc); return m ? `<span class="avatar" style="background:${m.c};color:${m.ink || inkFor(m.c)}" aria-hidden="true">${esc(m.l)}</span>` : null; };
 
 // カテゴリは色が「そのカテゴリ」に付く（順位では変えない）。8 色を超える分はグレー
-const CAT_SLOT = { 交通: 1, 外食: 2, 食費: 3, コンビニ: 4, "衣服・美容": 5, 日用品: 6, "趣味・娯楽": 7, ネットショッピング: 8 };
+const CAT_SLOT = { 交通: 1, 外食: 2, 食費: 3, コンビニ: 4, "衣服・美容": 5, 旅行: 6, "趣味・娯楽": 7, ネットショッピング: 8 };
 const catColor = (c) => (CAT_SLOT[c] ? `var(--series-${CAT_SLOT[c]})` : "var(--series-other)");
 const catIcon = (c) => `<span class="cat-ico" style="--c:${catColor(c)}" aria-hidden="true">${CAT_EMOJI[c] || "•"}</span>`;
 
