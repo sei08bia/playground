@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>お金の見える化</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>お金の見える化</h1>
+  <nav id="tabs">
+    <button data-tab="dashboard" class="active">ダッシュボード</button>
+    <button data-tab="transactions">明細</button>
+    <button data-tab="assets">口座・資産</button>
+    <button data-tab="recurring">固定費・サブスク</button>
+    <button data-tab="wishlist">ほしいもの</button>
+    <button data-tab="advice">AIアドバイス</button>
+    <button data-tab="settings">設定</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ======================= ダッシュボード ======================= -->
+  <section id="tab-dashboard" class="tab active">
+    <div id="onboarding" class="card notice" hidden>
+      まずは <a href="#" data-goto="settings">設定</a> で手取り月収を、<a href="#" data-goto="assets">口座・資産</a> で口座・カード・NISA・iDeCo を登録してください。
+    </div>
+    <div class="grid hero-grid">
+      <div class="card hero" id="hero-month"></div>
+      <div class="card hero" id="hero-today"></div>
+      <div class="card hero" id="hero-worth"></div>
+    </div>
+    <div class="card" id="pace-card"></div>
+    <div id="alerts"></div>
+    <div class="grid two">
+      <div class="card"><h2>カテゴリ別（今期・変動費）</h2><div id="cat-chart"></div></div>
+      <div class="card"><h2>カードの利用状況</h2><div id="cards-list"></div></div>
+    </div>
+    <div class="grid two">
+      <div class="card"><h2>資産の内訳</h2><div id="asset-breakdown"></div></div>
+      <div class="card"><h2>1か月以内の引き落とし</h2><div id="upcoming"></div></div>
+    </div>
+    <div class="card"><h2>純資産の推移</h2><div id="worth-chart" class="chart"></div></div>
+    <div class="grid two">
+      <div class="card"><h2>固定費・サブスク（月換算）</h2><div id="recurring-summary"></div></div>
+      <div class="card"><h2>ほしいもの</h2><div id="wish-summary"></div></div>
+    </div>
+    <div class="card ai-card">
+      <div class="row-between"><h2>AIのひとこと</h2><button class="primary" id="quick-advice">診断する</button></div>
+      <div id="quick-advice-out" class="md muted">「診断する」を押すと、今の家計についてアドバイスします。</div>
+    </div>
+  </section>
+
+  <!-- ======================= 明細 ======================= -->
+  <section id="tab-transactions" class="tab">
+    <div class="grid two">
+      <form class="card form" id="tx-form">
+        <h2>支出・収入を記録</h2>
+        <input type="hidden" name="id">
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="type" value="expense" checked> 支出</label>
+          <label><input type="radio" name="type" value="income"> 収入</label>
+          <label><input type="radio" name="type" value="transfer"> 振替</label>
+        </div>
+        <label>日付<input type="date" name="date" required></label>
+        <label>金額（円）<input type="number" name="amount" min="1" required inputmode="numeric"></label>
+        <label>内容<input name="description" placeholder="例: スーパー"></label>
+        <label>カテゴリ<input name="category" list="category-list" placeholder="自動判定"></label>
+        <label>支払い方法<select name="account_id" class="account-select"></select></label>
+        <label>固定費の支払い<select name="recurring_id" class="recurring-select"></select></label>
+        <label>メモ<input name="memo"></label>
+        <div class="actions"><button class="primary" type="submit">保存</button><button type="reset">クリア</button></div>
+      </form>
+      <form class="card form" id="csv-form">
+        <h2>CSV を取り込む</h2>
+        <p class="muted small">カード会社・銀行の利用明細 CSV、マネーフォワード ME のエクスポートに対応。Shift_JIS / UTF-8 どちらでも可。同じ明細は二重に取り込まれません。</p>
+        <label>ファイル<input type="file" name="file" accept=".csv,text/csv" required></label>
+        <label>どの口座・カードの明細？<select name="account_id" class="account-select"></select></label>
+        <div class="actions"><button type="button" id="csv-preview">プレビュー</button><button class="primary" type="submit">取り込む</button></div>
+        <div id="csv-result"></div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="row-between wrap">
+        <h2>明細</h2>
+        <div class="filters">
+          <input type="month" id="tx-month">
+          <select id="tx-account" class="account-select"></select>
+          <input id="tx-search" placeholder="検索">
+        </div>
+      </div>
+      <div id="tx-total" class="muted small"></div>
+      <div class="table-wrap"><table id="tx-table"></table></div>
+    </div>
+  </section>
+
+  <!-- ======================= 口座・資産 ======================= -->
+  <section id="tab-assets" class="tab">
+    <div class="grid two">
+      <form class="card form" id="account-form">
+        <h2>口座・カード・資産を登録</h2>
+        <input type="hidden" name="id">
+        <label>種類
+          <select name="kind" required>
+            <option value="bank">銀行口座</option><option value="cash">現金</option><option value="emoney">電子マネー</option>
+            <option value="card">クレジットカード</option><option value="securities">証券口座（特定・一般）</option>
+            <option value="nisa">NISA</option><option value="ideco">iDeCo</option><option value="dc">企業型DC</option>
+            <option value="loan">ローン・借入</option><option value="other">その他資産</option>
+          </select>
+        </label>
+        <label>名前<input name="name" required placeholder="例: 給与口座"></label>
+        <label>金融機関<input name="institution"></label>
+        <label class="not-card">残高・評価額（円）<input type="number" name="balance" value="0"></label>
+        <label class="invest-only">拠出・積立元本の累計（円）<input type="number" name="contributed"></label>
+        <label class="card-only">締め日（31=月末）<input type="number" name="closing_day" min="1" max="31" value="31"></label>
+        <label class="card-only">引き落とし日（翌月）<input type="number" name="payment_day" min="1" max="31" value="27"></label>
+        <label class="card-only">引き落とし口座<select name="payment_account_id" class="bank-select"></select></label>
+        <label class="card-only">利用枠（円）<input type="number" name="card_limit"></label>
+        <label>メモ<input name="note"></label>
+        <div class="actions"><button class="primary" type="submit">保存</button><button type="reset">クリア</button></div>
+        <p class="muted small">残高を更新するたびに履歴が残り、純資産の推移グラフになります。NISA・iDeCo は証券会社のサイトで評価額を見て月 1 回更新するのがおすすめです。</p>
+      </form>
+      <div class="card"><h2>登録済み</h2><div id="account-list"></div></div>
+    </div>
+  </section>
+
+  <!-- ======================= 固定費・サブスク ======================= -->
+  <section id="tab-recurring" class="tab">
+    <div class="grid two">
+      <form class="card form" id="recurring-form">
+        <h2>固定費・サブスク・インフラを登録</h2>
+        <input type="hidden" name="id">
+        <label>種類
+          <select name="kind">
+            <option value="subscription">サブスク</option>
+            <option value="utility">インフラ（電気・ガス・水道・通信）</option>
+            <option value="fixed">固定費（家賃・保険・ローンなど）</option>
+            <option value="investment">積立投資・掛金（NISA・iDeCo）</option>
+          </select>
+        </label>
+        <label>名前<input name="name" required placeholder="例: Netflix"></label>
+        <label>金額（円）<input type="number" name="amount" min="0" required></label>
+        <label>周期
+          <select name="cycle"><option value="monthly">毎月</option><option value="yearly">毎年</option><option value="weekly">毎週</option></select>
+        </label>
+        <label>請求日<input type="number" name="billing_day" min="1" max="31" placeholder="毎月何日"></label>
+        <label class="yearly-only">請求月<input type="number" name="billing_month" min="1" max="12"></label>
+        <label>支払い方法<select name="account_id" class="account-select"></select></label>
+        <label>明細の照合キーワード<input name="match_keyword" placeholder="例: NETFLIX（カンマ区切りで複数）"></label>
+        <label class="check"><input type="checkbox" name="variable"> 金額が毎月変わる（電気・ガスなど）</label>
+        <label class="check"><input type="checkbox" name="active" checked> 契約中</label>
+        <label>メモ<input name="note" placeholder="例: 最近あまり使っていない"></label>
+        <div class="actions"><button class="primary" type="submit">保存</button><button type="reset">クリア</button></div>
+        <p class="muted small">照合キーワードを入れておくと、CSV 取り込み時にその明細を「固定費の支払い」として扱い、変動費の予算から二重に引かれなくなります。</p>
+      </form>
+      <div class="card"><h2>一覧</h2><div id="recurring-list"></div></div>
+    </div>
+  </section>
+
+  <!-- ======================= ほしいもの ======================= -->
+  <section id="tab-wishlist" class="tab">
+    <div class="grid two">
+      <form class="card form" id="wish-form">
+        <h2>ほしいものを追加</h2>
+        <input type="hidden" name="id">
+        <label>名前<input name="name" required></label>
+        <label>価格（円）<input type="number" name="price" min="1" required></label>
+        <label>優先度<select name="priority"><option value="1">高</option><option value="2" selected>中</option><option value="3">低</option></select></label>
+        <label>取り分けている額（円）<input type="number" name="saved" value="0"></label>
+        <label>いつまでに<input type="date" name="target_date"></label>
+        <label>URL<input name="url" type="url"></label>
+        <label>状態<select name="status"><option value="want">ほしい</option><option value="bought">買った</option><option value="dropped">見送り</option></select></label>
+        <label>メモ<input name="note"></label>
+        <div class="actions"><button class="primary" type="submit">保存</button><button type="reset">クリア</button></div>
+      </form>
+      <div class="card"><h2>リスト</h2><div id="wish-list"></div></div>
+    </div>
+  </section>
+
+  <!-- ======================= AI ======================= -->
+  <section id="tab-advice" class="tab">
+    <div class="card">
+      <h2>AIに相談</h2>
+      <p class="muted small" id="ai-status"></p>
+      <form id="advice-form" class="ask">
+        <textarea name="question" rows="2" placeholder="例: 今月あといくら使える？ / 4万円のイヤホン買っていい？ / 見直すべきサブスクは？"></textarea>
+        <button class="primary" type="submit">相談する</button>
+      </form>
+      <div class="chips">
+        <button type="button" data-q="">今月の診断</button>
+        <button type="button" data-q="今月あといくら使えますか？今日の上限も教えて。">あといくら使える？</button>
+        <button type="button" data-q="見直したほうがいいサブスクや固定費はありますか？">固定費の見直し</button>
+        <button type="button" data-q="NISAやiDeCoの積立額は今の家計に対して適切ですか？">積立は適切？</button>
+        <button type="button" data-q="ほしいものリストの中で、いつ何を買うのがいいですか？">ほしいものの買い時</button>
+      </div>
+      <div id="advice-out" class="md"></div>
+    </div>
+    <div class="card"><h2>これまでの相談</h2><div id="advice-history"></div></div>
+  </section>
+
+  <!-- ======================= 設定 ======================= -->
+  <section id="tab-settings" class="tab">
+    <form class="card form narrow" id="settings-form">
+      <h2>家計の設定</h2>
+      <label>手取り月収（円）<input type="number" name="monthly_income" min="0"></label>
+      <label>家計の始まりの日<input type="number" name="cycle_start_day" min="1" max="31">
+        <span class="muted small">給料日起点で管理するなら給料日（例: 25）</span></label>
+      <label>毎月の先取り貯金（円）<input type="number" name="savings_goal" min="0">
+        <span class="muted small">NISA・iDeCo の積立は「固定費・サブスク」に積立投資として登録</span></label>
+      <label>生活防衛資金の目標（生活費の何か月分）<input type="number" name="emergency_fund_months" min="0" max="36"></label>
+      <h3>カテゴリ別予算（任意）</h3>
+      <div id="cat-budgets"></div>
+      <button type="button" id="add-cat-budget">＋ カテゴリを追加</button>
+      <div class="actions"><button class="primary" type="submit">保存</button></div>
+    </form>
+  </section>
+</main>
+
+<datalist id="category-list"></datalist>
+<div id="tooltip" class="tooltip" hidden></div>
+<div id="toast" class="toast" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
