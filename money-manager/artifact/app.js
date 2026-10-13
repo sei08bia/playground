@@ -547,8 +547,15 @@ function amountAt(s) { const m = s.match(/^\s*[-−]?\s*[¥\\]?\s*([0-9][0-9,]*)
 function dateAt(s) { const m = s.match(/(\d{4})\s*[/\-.年]\s*(\d{1,2})\s*[/\-.月]\s*(\d{1,2})/); if (!m) return null; const [y, mo, d] = m.slice(1).map(Number); return mo >= 1 && mo <= 12 && d >= 1 && d <= D.dim(y, mo) ? D.fmt(D.ymd(y, mo, d)) : null; }
 function findAmount(text, labels) { for (const i of labelHits(text, labels)) { const a = amountAt(text.slice(i, i + 30)); if (a != null) return a; } return null; }
 function findDate(text, labels) { for (const i of labelHits(text, labels)) { const d = dateAt(text.slice(i, i + 30)); if (d) return d; } return null; }
-function findLine(text, labels) { for (const i of labelHits(text, labels)) { const v = text.slice(i).match(/^[^\n\t]+/); const s = v && v[0].replace(/^[\s:：]+|[\s:：]+$/g, ""); if (s) return s.slice(0, 80); } return ""; }
-function cardLabel(text) { const m = text.match(/(?:\[?ご利用カード\]?|カード名称?)[\s:：】\]]*([^\n]+)/); return m ? m[1].trim() : ""; }
+// 「ご利用店舗名やお支払方法などの…ご確認ください。」のような説明文は値として拾わない
+function findLine(text, labels) { for (const i of labelHits(text, labels)) { const v = text.slice(i).match(/^[^\n\t]+/); const s = v && v[0].replace(/^[\s:：]+|[\s:：]+$/g, ""); if (s && !/[。]/.test(s) && !/^(?:舗|や|など|は|を|に|の)/.test(s)) return s.slice(0, 80); } return ""; }
+function cardLabel(text) {
+  const m = text.match(/(?:\[?ご利用カード\]?|カード名称?)[\s:：】\]]*([^\n]+)/);
+  if (m) return m[1].trim();
+  // 楽天カードの速報版は「楽天カード（Mastercard）をご利用いただき…」の書き出しにカード名がある
+  const n = text.match(/([^\n「」]{0,20}カード\s*\([^)\n]{2,30}\))\s*をご利用/);
+  return n ? n[1].trim() : "";
+}
 
 function parseMail(sender, subject, body, receivedDate) {
   const issuer = issuerFor(sender);
@@ -568,8 +575,13 @@ function parseMail(sender, subject, body, receivedDate) {
   if (amount == null) return { kind: "ignored", issuer, reason: "利用金額が見つかりません" };
   const date = findDate(text, L.date) || receivedDate;
   if (!date) return { kind: "ignored", issuer, reason: "利用日が見つかりません" };
-  const merchant = findLine(text, L.merchant);
-  return { kind: "transaction", issuer, card_label: cardLabel(text), date, amount, description: merchant || `${issuer}のご利用`, refund: CANCEL.test(subject) };
+  const merchant = findLine(text, L.merchant), refund = CANCEL.test(subject);
+  // 1 通に複数の利用が並ぶことがある（楽天カードの速報版など）。利用日の行ごとに区切って全部読む
+  const starts = [...labelHits(text, L.date)].map((i) => text.lastIndexOf("\n", i) + 1);
+  const items = starts.length > 1 ? starts.map((st, k) => text.slice(st, starts[k + 1] ?? text.length))
+    .map((blk) => ({ date: findDate(blk, L.date) || date, amount: findAmount(blk, L.amount), description: findLine(blk, L.merchant) || `${issuer}のご利用`, refund }))
+    .filter((x) => x.amount != null) : [];
+  return { kind: "transaction", issuer, card_label: cardLabel(text), date, amount, description: merchant || `${issuer}のご利用`, refund, ...(items.length > 1 ? { items } : {}) };
 }
 
 // 件名と送信元だけで、本文を取りに行く価値があるか判断する（Gmail の呼び出し回数を減らす）
@@ -588,7 +600,10 @@ function matchCard(p) {
   }
   const short = (p.issuer || "").replace("カード", "");
   const hit = cards.find((c) => !c.email_keyword && short && (c.name.includes(short) || (c.institution || "").includes(short)));
-  return hit ? hit.id : null;
+  if (hit) return hit.id;
+  // カード名が読めなくても、その会社のカードが 1 枚だけ登録されていればそれとみなす
+  const same = cards.filter((c) => short && (c.name.includes(short) || (c.institution || "").includes(short)));
+  return same.length === 1 ? same[0].id : null;
 }
 
 function matchRecurring(desc) {
@@ -800,29 +815,31 @@ async function syncGmail({ silent = false } = {}) {
         logMail({ ...base, status: "bill", detail: `${p.amount.toLocaleString()}円 ${p.payment_date}払い${p.confirmed ? "（確定）" : "（予定）"}` });
         continue;
       }
-      await ensureMonths([D.ym(p.date)]);
-      const type = p.refund ? "income" : "expense";
-      const dup = allTx().find((t) => t.amount === p.amount && t.type === type && (t.account_id || null) === accountId && ["csv", "manual"].includes(t.source) && !t.mail_id && Math.abs(D.parse(t.date) - D.parse(p.date)) <= 3);
-      if (dup) { dup.mail_id = m.id; touchedMonths.add(D.ym(dup.date)); summary.merged++; logMail({ ...base, status: "merged", detail: `既存の明細と同じ: ${dup.date} ${dup.description}` }); continue; }
-      // 楽天カードなどは同じ利用に【速報版】（利用先なし）と通常版（利用先あり）の 2 通が届く。2 通目は 1 件にまとめ、利用先が分かれば書き換える
-      const generic = (d) => !d || /のご利用$/.test(d);
-      const twin = allTx().find((t) => t.source === "gmail" && t.mail_id !== m.id && t.amount === p.amount && t.type === type && (t.account_id || null) === accountId &&
-        Math.abs(D.parse(t.date) - D.parse(p.date)) <= 3 && (generic(t.description) || generic(p.description)));
-      if (twin) {
-        if (generic(twin.description) && !generic(p.description)) {
-          const rec = type === "expense" ? matchRecurring(p.description) : null;
-          Object.assign(twin, { description: p.description, recurring_id: twin.recurring_id || rec,
-            category: twin.category === "未分類" || twin.category === guessCategory(twin.description) ? (p.refund ? "収入・返金" : guessCategory(p.description)) : twin.category });
+      for (const u of p.items || [p]) {
+        await ensureMonths([D.ym(u.date)]);
+        const type = u.refund ? "income" : "expense";
+        const dup = allTx().find((t) => t.amount === u.amount && t.type === type && (t.account_id || null) === accountId && ["csv", "manual"].includes(t.source) && !t.mail_id && Math.abs(D.parse(t.date) - D.parse(u.date)) <= 3);
+        if (dup) { dup.mail_id = m.id; touchedMonths.add(D.ym(dup.date)); summary.merged++; logMail({ ...base, status: "merged", detail: `既存の明細と同じ: ${dup.date} ${dup.description}` }); continue; }
+        // 楽天カードなどは同じ利用に【速報版】（利用先なし）と通常版（利用先あり）の 2 通が届く。2 通目は 1 件にまとめ、利用先が分かれば書き換える
+        const generic = (d) => !d || /のご利用$/.test(d);
+        const twin = allTx().find((t) => t.source === "gmail" && t.mail_id !== m.id && t.amount === u.amount && t.type === type && (t.account_id || null) === accountId &&
+          Math.abs(D.parse(t.date) - D.parse(u.date)) <= 3 && (generic(t.description) || generic(u.description)));
+        if (twin) {
+          if (generic(twin.description) && !generic(u.description)) {
+            const rec = type === "expense" ? matchRecurring(u.description) : null;
+            Object.assign(twin, { description: u.description, recurring_id: twin.recurring_id || rec,
+              category: twin.category === "未分類" || twin.category === guessCategory(twin.description) ? (u.refund ? "収入・返金" : guessCategory(u.description)) : twin.category });
+          }
+          twin.mail_ids = [...new Set([...(twin.mail_ids || []), m.id])];
+          touchedMonths.add(D.ym(twin.date)); summary.merged++;
+          logMail({ ...base, status: "merged", detail: `速報版と同じ利用: ${twin.date} ${twin.description}` });
+          continue;
         }
-        twin.mail_ids = [...new Set([...(twin.mail_ids || []), m.id])];
-        touchedMonths.add(D.ym(twin.date)); summary.merged++;
-        logMail({ ...base, status: "merged", detail: `速報版と同じ利用: ${twin.date} ${twin.description}` });
-        continue;
+        touchedMonths.add(addTx({ date: u.date, amount: u.amount, type, category: u.refund ? "収入・返金" : guessCategory(u.description), account_id: accountId,
+          description: u.description, recurring_id: type === "expense" ? matchRecurring(u.description) : null, source: "gmail", mail_id: m.id }));
+        summary.imported++;
+        logMail({ ...base, status: "imported", detail: accountId ? "" : "カード未登録のため口座なしで記録" });
       }
-      touchedMonths.add(addTx({ date: p.date, amount: p.amount, type, category: p.refund ? "収入・返金" : guessCategory(p.description), account_id: accountId,
-        description: p.description, recurring_id: type === "expense" ? matchRecurring(p.description) : null, source: "gmail", mail_id: m.id }));
-      summary.imported++;
-      logMail({ ...base, status: "imported", detail: accountId ? "" : "カード未登録のため口座なしで記録" });
     }
     // お店からの購入メール。AI の利用許可が要るので、自動取り込みでは許可済みのときだけ
     let receiptNote = "";
