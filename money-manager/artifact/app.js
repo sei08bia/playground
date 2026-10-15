@@ -92,7 +92,7 @@ function fillForm(form, data) {
 
 // ================================================================== store
 // app/<name> は 1 文書ずつ（{items:[...]} など）、明細は月ごとに tx/<YYYY-MM>
-const DEFAULT_SETTINGS = { monthly_income: 0, cycle_start_day: 1, savings_goal: 0, category_budgets: {}, emergency_fund_months: 6,
+const DEFAULT_SETTINGS = { reimburse_keywords: "定期,テイキ", monthly_income: 0, cycle_start_day: 1, savings_goal: 0, category_budgets: {}, emergency_fund_months: 6,
   gmail_auto: true, gmail_interval_min: 60, gmail_lookback_days: 45, receipts_enabled: true, receipt_account_id: "" };
 const APP_DOCS = { settings: () => ({ ...DEFAULT_SETTINGS }), accounts: () => ({ items: [] }), recurring: () => ({ items: [] }),
   wishlist: () => ({ items: [] }), bills: () => ({ items: [] }), mail: () => ({ seen: [], log: [], lastSync: null }), advice: () => ({ log: [] }) };
@@ -203,7 +203,13 @@ function recurringSummary(rec, today) {
 
 const inRange = (s, a, b) => { const d = D.parse(s); return a <= d && d < b; };
 // 立て替えた明細は自分の負担額だけを支出に数える（カードの請求額との照合は元の金額のまま）
-const mine = (t) => (t.own_share != null && t.own_share >= 0 && t.own_share < t.amount ? t.own_share : t.amount);
+// 会社が精算してくれる支払い（通勤定期など）は、店名が設定のキーワードに合えば自動で自分の負担 0 円にする
+function isCompanyPaid(t) {
+  if (t.type !== "expense" || t.own_share != null) return false;
+  const k = kanaKey(t.description);
+  return String(settings().reimburse_keywords || "").split(/[,、]/).map((x) => kanaKey(x.trim())).some((x) => x && k.includes(x));
+}
+const mine = (t) => (t.own_share != null && t.own_share >= 0 && t.own_share < t.amount ? t.own_share : isCompanyPaid(t) ? 0 : t.amount);
 // PayPay・楽天キャッシュで受け取った立替の精算は、その分を支出から差し引く（自分の分を毎回計算しなくてよい）。
 // 「自分の分」を入力済みの明細の精算（settles にその明細の id）は二重に引かない
 const isSettle = (t) => t.type === "transfer" && t.category === "立替の精算" && !t.settles;
@@ -1415,7 +1421,7 @@ function renderTxTable() {
       const rowC = t.type === "transfer" ? "var(--muted)" : t.type === "income" ? "var(--good)" : catColor(t.category);
       return `<div class="tx-row" style="--c:${rowC}">${t.type === "transfer" ? '<span class="cat-ico" style="--c:var(--muted)" aria-hidden="true">⇄</span>' : t.type === "income" ? '<span class="cat-ico" style="--c:var(--good)" aria-hidden="true">💰</span>' : merchantBadge(t.description) || catIcon(t.category)}
       <div class="tx-main"><div class="tx-desc">${esc(t.description)}</div>
-        <div class="tx-meta">${esc(t.category)}${a ? `<span class="sep">·</span>${accDot(a)}` : ""}${t.recurring_id ? `<span class="tag">固定費</span>` : ""}${t.own_share != null && t.own_share < t.amount ? `<span class="tag">自分の分 ${yen(t.own_share)}</span>` : ""}${t.source === "gmail" ? '<span class="tag">メール</span>' : ""}</div>
+        <div class="tx-meta">${esc(t.category)}${a ? `<span class="sep">·</span>${accDot(a)}` : ""}${t.recurring_id ? `<span class="tag">固定費</span>` : ""}${t.own_share === 0 || isCompanyPaid(t) ? `<span class="tag">会社精算</span>` : t.own_share != null && t.own_share < t.amount ? `<span class="tag">自分の分 ${yen(t.own_share)}</span>` : ""}${t.source === "gmail" ? '<span class="tag">メール</span>' : ""}</div>
         ${t.memo ? `<div class="tx-memo">${esc(t.memo)}</div>` : ""}</div>
       <div class="tx-amt ${t.type}">${t.type === "income" ? "+" : t.type === "transfer" ? "" : "−"}${yen(t.amount)}
         <div class="tx-act"><button class="link-btn" data-edit-tx="${esc(t.id)}" type="button">編集</button><button class="link-btn danger" data-del-tx="${esc(t.id)}" type="button">${pendingDelete === t.id ? "本当に削除" : "削除"}</button></div></div></div>`; }).join("")}</div>`).join("")
@@ -1470,6 +1476,7 @@ txForm.addEventListener("submit", async (e) => {
   render();
 });
 txForm.addEventListener("click", (e) => {
+  if (e.target.dataset.company != null) { txForm.own_share.value = 0; toast("会社精算（自分の負担 0円）にしました"); return; }
   const n = Number(e.target.dataset.split);
   if (!n) return;
   const amount = Number(txForm.amount.value);
@@ -1517,7 +1524,10 @@ async function importCsv(buf, accountId, dryRun) {
         S.tx[ym].splice(i, 1);
         touched.add(ym);
         const { id: _old, ...rest } = dup;
-        touched.add(addTx({ ...rest, date: it.date, account_id: accountId, memo: [dup.memo, `明細: ${it.description}`].filter(Boolean).join(" / "),
+        // 速報版メールの「楽天カードのご利用」のように店名がない明細は、CSV の店名に置き換える
+        const genericMail = !dup.description || /のご利用$/.test(dup.description);
+        if (genericMail) rest.description = it.description;
+        touched.add(addTx({ ...rest, date: it.date, account_id: accountId, memo: genericMail ? dup.memo : [dup.memo, `明細: ${it.description}`].filter(Boolean).join(" / "),
           category: dup.category === "未分類" ? it.category : dup.category, recurring_id: dup.recurring_id || matchRecurring(it.description) || matchRecurring(dup.description), source: "csv", h }));
       }
       continue;
@@ -1750,6 +1760,7 @@ function renderSettings() {
   if (setForm.contains(document.activeElement)) return; // 入力中は書き換えない
   const st = settings();
   for (const k of ["monthly_income", "cycle_start_day", "savings_goal", "emergency_fund_months"]) setForm[k].value = st[k];
+  setForm.reimburse_keywords.value = st.reimburse_keywords || "";
   $("#cat-budgets").innerHTML = "";
   Object.entries(st.category_budgets || {}).forEach(([c, a]) => catBudgetRow(c, a));
 }
@@ -1759,6 +1770,7 @@ setForm.addEventListener("submit", (e) => {
   const body = { ...settings() };
   for (const k of ["monthly_income", "cycle_start_day", "savings_goal", "emergency_fund_months"]) body[k] = Number(setForm[k].value || 0);
   body.cycle_start_day = Math.min(31, Math.max(1, body.cycle_start_day || 1));
+  body.reimburse_keywords = setForm.reimburse_keywords.value.trim();
   body.category_budgets = {};
   $$(".cat-budget-row").forEach((r) => { const n = r.querySelector(".cb-name").value.trim(), a = Number(r.querySelector(".cb-amt").value || 0); if (n && a > 0) body.category_budgets[n] = a; });
   S.settings = body;

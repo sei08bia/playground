@@ -130,6 +130,8 @@
       <label>毎月の先取り貯金（円）<input type="number" name="savings_goal" min="0">
         <span class="muted small">NISA・iDeCo の積立は「固定費・サブスク」に積立投資として登録</span></label>
       <label>生活防衛資金の目標（生活費の何か月分）<input type="number" name="emergency_fund_months" min="0" max="36"></label>
+      <label>会社が精算してくれる支払い（店名のキーワード）<input name="reimburse_keywords" id="reimburse-keywords" placeholder="例: 定期,テイキ">
+        <span class="muted small">明細の店名にこの文字が入っていれば、自分の負担 0 円として予算から外します（カンマ区切り）。通勤定期など</span></label>
       <h3>カテゴリ別予算（任意）</h3>
       <div id="cat-budgets"></div>
       <button type="button" id="add-cat-budget">＋ カテゴリを追加</button>
@@ -154,7 +156,7 @@
         <div class="own-share">
           <label for="tx-own">自分の負担額（立て替えたときだけ）<input type="number" id="tx-own" name="own_share" min="0" inputmode="numeric" placeholder="空欄なら全額が自分の分"></label>
           <div class="split-buttons small" aria-label="割り勘で計算">割り勘:
-            <button type="button" data-split="2">÷2</button><button type="button" data-split="3">÷3</button><button type="button" data-split="4">÷4</button><button type="button" data-split="5">÷5</button><button type="button" data-split="6">÷6</button><button type="button" data-split="8">÷8</button>
+            <button type="button" data-split="2">÷2</button><button type="button" data-split="3">÷3</button><button type="button" data-split="4">÷4</button><button type="button" data-split="5">÷5</button><button type="button" data-split="6">÷6</button><button type="button" data-split="8">÷8</button><button type="button" data-company>会社が払う</button>
           </div>
         </div>
         <label>内容<input name="description" placeholder="例: スーパー"></label>
