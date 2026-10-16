@@ -1256,8 +1256,22 @@ function renderDashboard() {
     <div class="value ${b.today_remaining < 0 ? "neg" : ""}">${yen(b.today_remaining)}</div></div><span class="badge">${ico("sun")}</span></div>
     <div class="calc">${yen(b.remaining + b.today_spent)} ÷ ${b.period.days_left}日${b.today_spent ? ` − 今日 ${yen(b.today_spent)}` : ""}</div>
     <div class="sub">毎日この額までなら予算内で終われます</div>`;
+  // 先月比と、貯金・積立・借入の返済で毎月どれだけ良くなるかの見込み
+  const hist = d.history, curH = hist[hist.length - 1], prevH = hist[hist.length - 2];
+  const delta = curH && prevH ? curH.net_worth - prevH.net_worth : null;
+  const loans = d.accounts.filter((a) => a.kind === "loan" && Number(a.loan_total) > 0 && Number(a.balance) > 0);
+  const principal = loans.reduce((x, a) => x + Math.max(0, (Number(a.loan_payment) || 0) - Math.round((Number(a.balance) * (Number(a.loan_rate) || 0)) / 100 / 12)), 0);
+  const improve = (b.savings_goal || 0) + (b.investment_monthly || 0) + principal;
+  const toPlus = w.net_worth < 0 && improve > 0 ? Math.ceil(-w.net_worth / improve) : null;
+  const plusAt = toPlus ? (() => { const [y, m] = D.addM(...D.parts(D.today()).slice(0, 2), toPlus); return `${y}年${m}月`; })() : "";
   $("#hero-worth").innerHTML = `<div class="hero-top"><div><div class="label">純資産（NISA・iDeCo 含む）</div>
     <div class="value">${yen(w.net_worth)}</div></div><span class="badge">${ico("bank")}</span></div>
+    ${delta != null ? `<div class="trend ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "▲" : "▼"} 先月より ${delta >= 0 ? "+" : "−"}${yen(Math.abs(delta))}</div>`
+      : improve > 0 ? `<div class="trend up">▲ 毎月 約 +${yen(improve)} ずつ増える見込み</div>` : ""}
+    ${toPlus ? `<div class="sub">このペースだと約${toPlus}か月（${plusAt}ごろ）でプラスに</div>` : ""}
+    ${loans.map((a) => { const r = Math.min(1, 1 - Number(a.balance) / Number(a.loan_total)); return `<div class="loan-prog"><div class="row-between"><span>${esc(a.name)}の返済</span><b>${Math.round(r * 100)}% 済み</b></div>
+      <div class="loan-bar" role="img" aria-label="${esc(a.name)} ${Math.round(r * 100)}% 返済済み"><span style="width:${r * 100}%"></span></div>
+      <div class="sub">残り ${yen(a.balance)}${a.loan_end ? `・完済 ${esc(a.loan_end)}` : ""}</div></div>`; }).join("")}
     <div class="calc">総資産 ${yen(w.total_assets)} − 借入・カード未払い ${yen(w.liability)}</div>
     <div class="sub"><span class="more">内訳を見る ›</span></div>`;
 

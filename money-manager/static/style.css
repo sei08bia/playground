@@ -392,3 +392,10 @@ dialog.form-sheet .form h2 { margin-right: 40px; font-size: 17px; color: var(--t
 .cat-foot { text-align: right; margin-top: 4px; }
 @media (max-width: 600px) { .spend-head .value.big { font-size: 30px; } }
 @media (max-width: 600px) { .cat-row { grid-template-columns: 30px minmax(96px, 1.6fr) minmax(24px, 1fr) 78px 32px; gap: 6px; } }
+.hero .trend { font-size: 13px; font-weight: 600; margin: 2px 0 4px; }
+.hero .trend.up { color: var(--good-ink); }
+.hero .trend.down { color: var(--critical-ink); }
+.loan-prog { margin: 8px 0 6px; font-size: 13px; }
+.loan-prog .row-between span { color: var(--text-2); }
+.loan-bar { height: 10px; background: var(--surface-2); border-radius: 5px; overflow: hidden; margin: 4px 0 2px; }
+.loan-bar span { display: block; height: 100%; background: var(--good); border-radius: 5px; }
