@@ -1203,7 +1203,7 @@ function renderAssets(d, w) {
   return `<div class="donut-wrap">${donut(groups.map((g) => ({ value: g.value, color: g.color, tip: `${g.label}|${yen(g.value)}（${p(g.value)}）` })), total)}
     <div class="asset-groups">${groups.map((g) => `<div class="asset-group"><div class="head"><span class="sw" style="background:var(${g.color})"></span><span>${esc(g.label)}<span class="p">${p(g.value)}</span>${g.k === "pension" ? '<span class="tag locked">60歳まで引出不可</span>' : ""}</span><span>${yen(g.value)}</span></div>
       ${g.items.map((a) => `<div class="acc">${avatar(a)}<span>${esc(a.name)}</span><span>${yen(a.balance)}</span></div>`).join("")}</div>`).join("")}
-      <div class="asset-total"><span>総資産</span><span>${yen(total)}</span><span class="muted">カード未払い・ローン</span><span class="neg">−${yen(w.liability)}</span><span class="big">純資産</span><span class="big">${yen(total - w.liability)}</span></div></div></div>`;
+      <div class="asset-total"><span>総資産</span><span>${yen(total)}</span><span class="muted">借入（奨学金など）・カード未払い</span><span class="neg">−${yen(w.liability)}</span><span class="big">純資産</span><span class="big">${yen(total - w.liability)}</span></div></div></div>`;
 }
 
 // 右下の ＋ ボタンと入力シート（明細・口座・固定費・ほしいもの）
@@ -1258,7 +1258,7 @@ function renderDashboard() {
     <div class="sub">毎日この額までなら予算内で終われます</div>`;
   $("#hero-worth").innerHTML = `<div class="hero-top"><div><div class="label">純資産（NISA・iDeCo 含む）</div>
     <div class="value">${yen(w.net_worth)}</div></div><span class="badge">${ico("bank")}</span></div>
-    <div class="calc">総資産 ${yen(w.total_assets)} − カード未払い ${yen(w.liability)}</div>
+    <div class="calc">総資産 ${yen(w.total_assets)} − 借入・カード未払い ${yen(w.liability)}</div>
     <div class="sub"><span class="more">内訳を見る ›</span></div>`;
 
   const budget = Math.max(b.variable_budget, 1);
