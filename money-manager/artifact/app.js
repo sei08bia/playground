@@ -398,7 +398,8 @@ function kanaKey(s) {
 
 function guessCategory(desc) {
   const t = kanaKey(desc);
-  for (const [cat, words] of CATEGORY_RULES) if (words.some((w) => t.includes(kanaKey(w)))) return cat;
+  // 短い言葉（ジーユー→ジユ など）は「シンジユク」に紛れるので先頭一致だけにする
+  for (const [cat, words] of CATEGORY_RULES) if (words.some((w) => { const k = kanaKey(w); return k && (k.length <= 3 ? t.startsWith(k) : t.includes(k)); })) return cat;
   return "未分類";
 }
 
@@ -834,14 +835,14 @@ async function syncGmail({ silent = false } = {}) {
           if (generic(twin.description) && !generic(u.description)) {
             const rec = type === "expense" ? matchRecurring(u.description) : null;
             Object.assign(twin, { description: u.description, recurring_id: twin.recurring_id || rec,
-              category: twin.category === "未分類" || twin.category === guessCategory(twin.description) ? (u.refund ? "収入・返金" : guessCategory(u.description)) : twin.category });
+              category: twin.category === "未分類" || twin.category === guessCategory(twin.description) ? (u.refund ? "収入・返金" : learnedCategory(u.description) || guessCategory(u.description)) : twin.category });
           }
           twin.mail_ids = [...new Set([...(twin.mail_ids || []), m.id])];
           touchedMonths.add(D.ym(twin.date)); summary.merged++;
           logMail({ ...base, status: "merged", detail: `速報版と同じ利用: ${twin.date} ${twin.description}` });
           continue;
         }
-        touchedMonths.add(addTx({ date: u.date, amount: u.amount, type, category: u.refund ? "収入・返金" : guessCategory(u.description), account_id: accountId,
+        touchedMonths.add(addTx({ date: u.date, amount: u.amount, type, category: u.refund ? "収入・返金" : learnedCategory(u.description) || guessCategory(u.description), account_id: accountId,
           description: u.description, recurring_id: type === "expense" ? matchRecurring(u.description) : null, source: "gmail", mail_id: m.id }));
         summary.imported++;
         logMail({ ...base, status: "imported", detail: accountId ? "" : "カード未登録のため口座なしで記録" });
@@ -1507,6 +1508,15 @@ function findMailTwin(it, accountId) {
     ((t.account_id || null) === accountId || (t.source === "receipt" && !t.account_id)) &&
     Math.abs(D.parse(t.date) - D.parse(it.date)) <= (t.source === "receipt" ? 5 : 3));
   return cands.sort((a, b) => Math.abs(D.parse(a.date) - D.parse(it.date)) - Math.abs(D.parse(b.date) - D.parse(it.date)))[0] || null;
+}
+
+// 同じ店名に前に付けた（または直した）カテゴリ。新しい明細ほど優先
+function learnedCategory(desc) {
+  const key = kanaKey(cleanShop(desc));
+  let hit = null;
+  for (const t of [...allTx()].sort((a, b) => a.date.localeCompare(b.date)))
+    if (t.category && t.category !== "未分類" && !t.recurring_id && kanaKey(cleanShop(t.description)) === key) hit = t.category;
+  return hit;
 }
 
 async function importCsv(buf, accountId, dryRun) {
