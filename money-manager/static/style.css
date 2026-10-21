@@ -21,6 +21,7 @@
   --series-other: #a3a29b;
   --track: #e4e2dc;
   --track-ink: #b9b7af;
+  --buffer: #f3c96b;
   --good: #0ca30c;
   --good-ink: #006300;
   --warning: #fab219;
@@ -47,7 +48,7 @@
     --series-4: #c98500;
     --series-5: #d55181;
     --accent-soft: #1d2b3d;
-    --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-other: #6b6a64; --track: #33332f; --track-ink: #5a5954;
+    --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-other: #6b6a64; --track: #33332f; --track-ink: #5a5954; --buffer: #8a6a1c;
     --good-ink: #4cc44c;
     --warning-ink: #fab219;
     --critical-ink: #ef7272;
@@ -58,7 +59,7 @@
   color-scheme: dark;
   --bg: #111110; --surface: #1a1a19; --surface-2: #242422; --border: #33332f;
   --text: #f0efec; --text-2: #c3c2b7; --muted: #94938c; --accent: #3987e5;
-  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181; --accent-soft: #1d2b3d; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-other: #6b6a64; --track: #33332f; --track-ink: #5a5954;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181; --accent-soft: #1d2b3d; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-other: #6b6a64; --track: #33332f; --track-ink: #5a5954; --buffer: #8a6a1c;
   --good-ink: #4cc44c; --warning-ink: #fab219; --critical-ink: #ef7272; --grid: #2c2c29;
 }
 
@@ -399,3 +400,11 @@ dialog.form-sheet .form h2 { margin-right: 40px; font-size: 17px; color: var(--t
 .loan-prog .row-between span { color: var(--text-2); }
 .loan-bar { height: 10px; background: var(--surface-2); border-radius: 5px; overflow: hidden; margin: 4px 0 2px; }
 .loan-bar span { display: block; height: 100%; background: var(--good); border-radius: 5px; }
+
+/* 貯金枠（予備） */
+.status.buffer { background: color-mix(in srgb, var(--warning) 22%, var(--surface)); color: var(--warning-ink); }
+.warn-ink { color: var(--warning-ink); }
+.buffer-note { margin-top: 6px; font-size: 13px; padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--warning) 20%, var(--surface)); color: var(--text); }
+.buffer-note b { color: var(--warning-ink); }
+.buffer-note.soft { background: var(--surface-2); color: var(--text-2); }
+.pace-verdict.buffer b { color: var(--warning-ink); }

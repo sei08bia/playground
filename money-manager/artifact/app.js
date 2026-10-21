@@ -30,7 +30,7 @@ const D = {
 const KIND_LABELS = { bank: "銀行口座", cash: "現金", emoney: "電子マネー", card: "クレジットカード", securities: "証券口座", nisa: "NISA", ideco: "iDeCo", dc: "企業型DC", loan: "ローン", other: "その他資産" };
 const REC_LABELS = { subscription: "サブスク", utility: "インフラ", fixed: "固定費", investment: "積立投資" };
 const CYCLE_LABELS = { monthly: "毎月", yearly: "毎年", weekly: "毎週" };
-const STATUS_TEXT = { ok: "順調", warning: "ペース早め", over: "予算オーバー", deficit: "赤字構造" };
+const STATUS_TEXT = { ok: "順調", warning: "ペース早め", buffer: "貯金枠を使用中", over: "予算オーバー", deficit: "赤字構造" };
 const VERDICT_TEXT = { buy_ok: "今月の予算で買えます", buy_from_savings: "貯金から出せば買えます", wait: "もう少し待ちましょう" };
 const LIQUID = new Set(["bank", "cash", "emoney"]), INVEST = new Set(["securities", "nisa"]), PENSION = new Set(["ideco", "dc"]), LIAB = new Set(["loan"]);
 
@@ -230,11 +230,15 @@ function budgetSummary(st, rec, txs, today) {
   const spent = expenses.filter((t) => !t.recurring_id).reduce((s, t) => s + mine(t), 0) - reimbursed;
   const todaySpent = expenses.filter((t) => !t.recurring_id && D.parse(t.date) === today).reduce((s, t) => s + mine(t), 0) - settledIn(txs, start, end, today);
   const remaining = variableBudget - spent;
-  const daily = daysLeft > 0 ? Math.floor((remaining + todaySpent) / daysLeft) : remaining;
+  // 先取り貯金を「いざというときの予備」として使えるお金に含める設定。予算を超えたら貯金枠から減っていく
+  const buffer = st.savings_flex ? savingsGoal : 0;
+  const remainingAll = remaining + buffer;
+  const base = remaining > 0 || !buffer ? remaining : remainingAll;
+  const daily = daysLeft > 0 ? Math.floor((base + todaySpent) / daysLeft) : base;
   const expected = totalDays ? (variableBudget * elapsed) / totalDays : 0;
   const pace = expected > 0 ? spent / expected : null;
   const projected = elapsed > 0 ? Math.round((spent / elapsed) * totalDays) : spent;
-  const status = variableBudget <= 0 && income > 0 ? "deficit" : remaining < 0 ? "over" : pace != null && pace > 1.05 ? "warning" : "ok";
+  const status = variableBudget <= 0 && income > 0 ? "deficit" : remainingAll < 0 ? "over" : remaining < 0 ? "buffer" : pace != null && pace > 1.05 ? "warning" : "ok";
   const byCat = {};
   for (const t of expenses) if (!t.recurring_id) byCat[t.category || "未分類"] = (byCat[t.category || "未分類"] || 0) + mine(t);
   const budgets = st.category_budgets || {};
@@ -247,7 +251,7 @@ function budgetSummary(st, rec, txs, today) {
   const avg = withData.length ? Math.round(withData.reduce((s, v) => s + v, 0) / withData.length) : null;
   return { period: { start: D.fmt(start), end: D.fmt(end - 1), total_days: totalDays, elapsed_days: elapsed, days_left: daysLeft },
     income, planned_income: planned, actual_income: actualIncome, fixed_monthly: rs.monthly_spending, investment_monthly: rs.monthly_investment,
-    savings_goal: savingsGoal, variable_budget: variableBudget, spent, reimbursed, today_spent: todaySpent, remaining, daily_allowance: daily,
+    savings_goal: savingsGoal, variable_budget: variableBudget, buffer, remaining_all: remainingAll, buffer_left: Math.max(0, Math.min(buffer, remainingAll)), spent, reimbursed, today_spent: todaySpent, remaining, daily_allowance: daily,
     today_remaining: daily - todaySpent, expected_by_now: Math.round(expected), pace_ratio: pace, projected_spent: projected,
     projected_surplus: variableBudget - projected, status, categories, history, avg_variable_spent: avg, recurring: rs };
 }
@@ -1248,14 +1252,16 @@ function renderDashboard() {
   let spendView = "budget";
   try { spendView = localStorage.getItem("spendView") || "budget"; } catch {}
   $("#hero-month").innerHTML = `<div class="row-between wrap spend-head"><div><div class="label">今月あと使えるお金 <span class="status ${b.status}">${STATUS_TEXT[b.status]}</span></div>
-      <div class="value big ${b.remaining < 0 ? "neg" : ""}">${yen(b.remaining)}</div>
-      <div class="sub">予算 ${yen(b.variable_budget)} のうち ${yen(b.spent)}（${pct(b.spent / Math.max(1, b.variable_budget))}）使用・${md(b.period.end)}の締めまで あと${b.period.days_left}日</div></div>
+      <div class="value big ${b.remaining_all < 0 ? "neg" : b.remaining < 0 ? "warn-ink" : ""}">${yen(b.buffer ? b.remaining_all : b.remaining)}</div>
+      <div class="sub">予算 ${yen(b.variable_budget)}${b.buffer ? ` ＋ 貯金枠 ${yen(b.buffer)}` : ""} のうち ${yen(b.spent)} 使用・${md(b.period.end)}の締めまで あと${b.period.days_left}日</div>
+      ${b.status === "buffer" ? `<div class="buffer-note">⚠ 予算を超えて<b>貯金枠</b>を使っています。今月の貯金はあと <b>${yen(b.buffer_left)}</b>（${yen(b.buffer)} 中）</div>`
+        : b.buffer && b.remaining >= 0 && b.remaining < b.variable_budget * 0.1 ? `<div class="buffer-note soft">もうすぐ貯金枠に入ります（予算の残り ${yen(b.remaining)}）</div>` : ""}</div>
     <div class="seg small-seg" role="group" aria-label="グラフの表示">
       <button type="button" data-spend-view="budget" aria-pressed="${spendView === "budget"}">予算に対して</button>
       <button type="button" data-spend-view="spent" aria-pressed="${spendView === "spent"}">使った内訳</button></div></div>`;
   $("#hero-today").innerHTML = `<div class="hero-top"><div><div class="label">今日あと使えるお金</div>
     <div class="value ${b.today_remaining < 0 ? "neg" : ""}">${yen(b.today_remaining)}</div></div><span class="badge">${ico("sun")}</span></div>
-    <div class="calc">${yen(b.remaining + b.today_spent)} ÷ ${b.period.days_left}日${b.today_spent ? ` − 今日 ${yen(b.today_spent)}` : ""}</div>
+    <div class="calc">${yen((b.remaining > 0 || !b.buffer ? b.remaining : b.remaining_all) + b.today_spent)} ÷ ${b.period.days_left}日${b.today_spent ? ` − 今日 ${yen(b.today_spent)}` : ""}</div>
     <div class="sub">毎日この額までなら予算内で終われます</div>`;
   // 先月比と、貯金・積立・借入の返済で毎月どれだけ良くなるかの見込み
   const hist = d.history, curH = hist[hist.length - 1], prevH = hist[hist.length - 2];
@@ -1284,7 +1290,7 @@ function renderDashboard() {
     <div class="flow" role="img" aria-label="手取りの内訳">${flowParts.filter(([, v]) => v > 0).map(([l, v, c]) => `<div style="flex:${v};background:var(${c})" data-tip="${l}|${yen(v)}（${pct(v / inc)}）" data-sw="${c}"></div>`).join("")}${restV ? `<div class="rest" style="flex:${restV}" data-tip="あと使える|${yen(restV)}（${pct(restV / inc)}）"></div>` : ""}</div>
     <div class="flow-legend">${flowParts.map(([l, v, c]) => `<span><span class="sw" style="background:var(${c})"></span>${l}<b>${yen(v)}</b></span>`).join("")}<span><span class="sw" style="background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--border)"></span>あと使える<b>${yen(restV)}</b></span></div>`;
   $("#pace-card").innerHTML = flowHtml + `<div class="row-between wrap pace-head"><h2>${ico("gauge")}使ったペース</h2>
-      <span class="pace-verdict ${b.status}">${b.projected_surplus >= 0 ? `このままだと締めで <b>${yen(b.projected_surplus)}</b> 余る` : `このままだと <b>${yen(-b.projected_surplus)}</b> 足りない`}</span></div>
+      <span class="pace-verdict ${b.status}">${b.projected_surplus >= 0 ? `このままだと締めで <b>${yen(b.projected_surplus)}</b> 余る` : b.buffer && -b.projected_surplus <= b.buffer ? `このままだと貯金枠から <b>${yen(-b.projected_surplus)}</b> 使う見込み` : `このままだと <b>${yen(-b.projected_surplus - b.buffer)}</b> 足りない`}</span></div>
     ${renderCumChart(b)}${b.reimbursed ? `<p class="small muted">立替の精算 ${yen(b.reimbursed)} を差し引き済み</p>` : ""}`;
 
   const alerts = [];
@@ -1302,12 +1308,14 @@ function renderDashboard() {
   const byBudget = spendView === "budget" && b.variable_budget > 0;
   const restB = Math.max(0, b.remaining);
   if (byBudget && restB) slices.push({ value: restB, color: "--track", tip: `あと使える|${yen(restB)}（予算の ${pct(restB / b.variable_budget)}）`, track: true });
+  if (byBudget && b.buffer_left) slices.push({ value: b.buffer_left, color: "--buffer", tip: `貯金枠の残り|${yen(b.buffer_left)}（${yen(b.buffer)} 中）`, track: true });
   const share = (v) => pct(v / Math.max(1, byBudget ? b.variable_budget : gross));
-  $("#cat-chart").innerHTML = gross > 0 || byBudget ? `<div class="donut-wrap spend">${byBudget ? donut(slices, b.remaining, "あと使える", `予算 ${man(b.variable_budget)}`) : donut(slices, b.spent, "使った")}
+  $("#cat-chart").innerHTML = gross > 0 || byBudget ? `<div class="donut-wrap spend">${byBudget ? donut(slices, b.buffer ? b.remaining_all : b.remaining, "あと使える", `予算 ${man(b.variable_budget + b.buffer)}`) : donut(slices, b.spent, "使った")}
     <div class="cat-list">${cats.filter((c) => c.spent > 0).map((c) => `<div class="cat-row" data-tip="${esc(c.category)}|${yen(c.spent)}（${pct(c.spent / gross)}）">${catIcon(c.category)}
       <span class="nm">${esc(c.category)}</span><span class="bar"><span style="width:${(c.spent / cats[0].spent) * 100}%;background:${catColor(c.category)}"></span></span><span class="amt">${yen(c.spent)}</span><span class="pct">${share(c.spent)}</span></div>`).join("")}
       ${b.reimbursed ? `<div class="cat-row muted small"><span></span><span class="nm">立替の精算（受け取り）</span><span></span><span class="amt">−${yen(b.reimbursed)}</span><span></span></div>` : ""}
-      ${byBudget ? `<div class="cat-row rest"><span class="cat-ico" style="--c:var(--track)" aria-hidden="true">✓</span><span class="nm">あと使える</span><span class="bar"><span style="width:${Math.min(100, (restB / Math.max(1, cats[0]?.spent || restB)) * 100)}%;background:var(--track-ink)"></span></span><span class="amt">${yen(restB)}</span><span class="pct">${share(restB)}</span></div>` : ""}
+      ${byBudget && (restB > 0 || !b.buffer) ? `<div class="cat-row rest"><span class="cat-ico" style="--c:var(--track)" aria-hidden="true">✓</span><span class="nm">あと使える</span><span class="bar"><span style="width:${Math.min(100, (restB / Math.max(1, cats[0]?.spent || restB)) * 100)}%;background:var(--track-ink)"></span></span><span class="amt">${yen(restB)}</span><span class="pct">${share(restB)}</span></div>` : ""}
+      ${byBudget && b.buffer ? `<div class="cat-row rest"><span class="cat-ico" style="--c:var(--buffer)" aria-hidden="true">🐷</span><span class="nm">貯金枠の残り</span><span class="bar"><span style="width:${(b.buffer_left / b.buffer) * 100}%;background:var(--buffer)"></span></span><span class="amt">${yen(b.buffer_left)}</span><span class="pct">${pct(b.buffer_left / b.buffer)}</span></div>` : ""}
       <div class="cat-foot"><a href="#" class="small" data-goto="transactions">明細を見る ›</a></div></div></div>`
     : `<p class="muted">今期の支出はまだありません。右下の ＋ から記録するか、カードの CSV を取り込んでください。</p>`;
 
@@ -1785,6 +1793,7 @@ function renderSettings() {
   const st = settings();
   for (const k of ["monthly_income", "cycle_start_day", "savings_goal", "emergency_fund_months"]) setForm[k].value = st[k];
   setForm.reimburse_keywords.value = st.reimburse_keywords || "";
+  setForm.savings_flex.checked = !!st.savings_flex;
   $("#cat-budgets").innerHTML = "";
   Object.entries(st.category_budgets || {}).forEach(([c, a]) => catBudgetRow(c, a));
 }
@@ -1795,6 +1804,7 @@ setForm.addEventListener("submit", (e) => {
   for (const k of ["monthly_income", "cycle_start_day", "savings_goal", "emergency_fund_months"]) body[k] = Number(setForm[k].value || 0);
   body.cycle_start_day = Math.min(31, Math.max(1, body.cycle_start_day || 1));
   body.reimburse_keywords = setForm.reimburse_keywords.value.trim();
+  body.savings_flex = setForm.savings_flex.checked;
   body.category_budgets = {};
   $$(".cat-budget-row").forEach((r) => { const n = r.querySelector(".cb-name").value.trim(), a = Number(r.querySelector(".cb-amt").value || 0); if (n && a > 0) body.category_budgets[n] = a; });
   S.settings = body;
