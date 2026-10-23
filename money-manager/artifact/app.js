@@ -403,7 +403,7 @@ function kanaKey(s) {
 function guessCategory(desc) {
   const t = kanaKey(desc);
   // 短い言葉（ジーユー→ジユ など）は「シンジユク」に紛れるので先頭一致だけにする
-  for (const [cat, words] of CATEGORY_RULES) if (words.some((w) => { const k = kanaKey(w); return k && (k.length <= 3 ? t.startsWith(k) : t.includes(k)); })) return cat;
+  for (const [cat, words] of CATEGORY_RULES) if (words.some((w) => { const k = kanaKey(w); return k && (k.length <= 3 && /^[ァ-ヶA-Z0-9]+$/.test(k) ? t.startsWith(k) : t.includes(k)); })) return cat;
   return "未分類";
 }
 
@@ -592,7 +592,7 @@ function parseMail(sender, subject, body, receivedDate) {
   const items = starts.length > 1 ? starts.map((st, k) => text.slice(st, starts[k + 1] ?? text.length))
     .map((blk) => ({ date: findDate(blk, L.date) || date, amount: findAmount(blk, L.amount), description: findLine(blk, L.merchant) || `${issuer}のご利用`, refund }))
     .filter((x) => x.amount != null) : [];
-  return { kind: "transaction", issuer, card_label: cardLabel(text), date, amount, description: merchant || `${issuer}のご利用`, refund, ...(items.length > 1 ? { items } : {}) };
+  return { kind: "transaction", issuer, card_label: cardLabel(text), date, amount, description: merchant || `${issuer}のご利用`, refund, flash: /速報/.test(subject), ...(items.length > 1 ? { items } : {}) };
 }
 
 // 件名と送信元だけで、本文を取りに行く価値があるか判断する（Gmail の呼び出し回数を減らす）
@@ -833,13 +833,17 @@ async function syncGmail({ silent = false } = {}) {
         if (dup) { dup.mail_id = m.id; touchedMonths.add(D.ym(dup.date)); summary.merged++; logMail({ ...base, status: "merged", detail: `既存の明細と同じ: ${dup.date} ${dup.description}` }); continue; }
         // 楽天カードなどは同じ利用に【速報版】（利用先なし）と通常版（利用先あり）の 2 通が届く。2 通目は 1 件にまとめ、利用先が分かれば書き換える
         const generic = (d) => !d || /のご利用$/.test(d);
+        // 速報版から入った明細は、あとで名前やカテゴリを自分で直していても同じ利用として扱う
+        const fromFlash = (t) => t.flash || String((S.mail.log || []).find((l) => l.id === t.mail_id)?.subject || "").includes("速報");
         const twin = allTx().find((t) => t.source === "gmail" && t.mail_id !== m.id && t.amount === u.amount && t.type === type && (t.account_id || null) === accountId &&
-          Math.abs(D.parse(t.date) - D.parse(u.date)) <= 3 && (generic(t.description) || generic(u.description)));
+          Math.abs(D.parse(t.date) - D.parse(u.date)) <= 3 && (generic(t.description) || generic(u.description) || (fromFlash(t) && !p.flash)));
         if (twin) {
           if (generic(twin.description) && !generic(u.description)) {
             const rec = type === "expense" ? matchRecurring(u.description) : null;
             Object.assign(twin, { description: u.description, recurring_id: twin.recurring_id || rec,
               category: twin.category === "未分類" || twin.category === guessCategory(twin.description) ? (u.refund ? "収入・返金" : learnedCategory(u.description) || guessCategory(u.description)) : twin.category });
+          } else if (!generic(u.description) && !String(twin.memo || "").includes(u.description)) {
+            twin.memo = [twin.memo, `明細: ${u.description}`].filter(Boolean).join(" / ");
           }
           twin.mail_ids = [...new Set([...(twin.mail_ids || []), m.id])];
           touchedMonths.add(D.ym(twin.date)); summary.merged++;
@@ -847,7 +851,7 @@ async function syncGmail({ silent = false } = {}) {
           continue;
         }
         touchedMonths.add(addTx({ date: u.date, amount: u.amount, type, category: u.refund ? "収入・返金" : learnedCategory(u.description) || guessCategory(u.description), account_id: accountId,
-          description: u.description, recurring_id: type === "expense" ? matchRecurring(u.description) : null, source: "gmail", mail_id: m.id }));
+          description: u.description, recurring_id: type === "expense" ? matchRecurring(u.description) : null, source: "gmail", mail_id: m.id, ...(p.flash ? { flash: true } : {}) }));
         summary.imported++;
         logMail({ ...base, status: "imported", detail: accountId ? "" : "カード未登録のため口座なしで記録" });
       }
@@ -1102,7 +1106,7 @@ const MERCHANTS = [
 function merchantOf(desc) {
   const k = kanaKey(desc);
   // 短い名前（ジーユー→ジユ、イオン など）は「新宿」「エイチケイオン」に紛れるので、先頭に来たときだけ
-  for (const [keys, c, l, ink] of MERCHANTS) if (keys.some((x) => x && (x.length <= 3 ? k.startsWith(x) : k.includes(x)))) return { c, l, ink };
+  for (const [keys, c, l, ink] of MERCHANTS) if (keys.some((x) => x && (x.length <= 3 && /^[ァ-ヶA-Z0-9]+$/.test(x) ? k.startsWith(x) : k.includes(x)))) return { c, l, ink };
   return null;
 }
 const merchantBadge = (desc) => { const m = merchantOf(desc); return m ? `<span class="avatar" style="background:${m.c};color:${m.ink || inkFor(m.c)}" aria-hidden="true">${esc(m.l)}</span>` : null; };
