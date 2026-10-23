@@ -29,7 +29,7 @@ const D = {
 
 const KIND_LABELS = { bank: "銀行口座", cash: "現金", emoney: "電子マネー", card: "クレジットカード", securities: "証券口座", nisa: "NISA", ideco: "iDeCo", dc: "企業型DC", loan: "ローン", other: "その他資産" };
 const REC_LABELS = { subscription: "サブスク", utility: "インフラ", fixed: "固定費", investment: "積立投資" };
-const CYCLE_LABELS = { monthly: "毎月", yearly: "毎年", weekly: "毎週" };
+const CYCLE_LABELS = { monthly: "毎月", quarterly: "3か月ごと", yearly: "毎年", weekly: "毎週" };
 const STATUS_TEXT = { ok: "順調", warning: "ペース早め", buffer: "貯金枠を使用中", over: "予算オーバー", deficit: "赤字構造" };
 const VERDICT_TEXT = { buy_ok: "今月の予算で買えます", buy_from_savings: "貯金から出せば買えます", wait: "もう少し待ちましょう" };
 const LIQUID = new Set(["bank", "cash", "emoney"]), INVEST = new Set(["securities", "nisa"]), PENSION = new Set(["ideco", "dc"]), LIAB = new Set(["loan"]);
@@ -168,7 +168,7 @@ function previousPeriods(today, sd, n) {
   return out;
 }
 
-const monthlyEq = (r) => { const a = Number(r.amount) || 0; return r.cycle === "yearly" ? Math.round(a / 12) : r.cycle === "weekly" ? Math.round((a * 52) / 12) : a; };
+const monthlyEq = (r) => { const a = Number(r.amount) || 0; return r.cycle === "yearly" ? Math.round(a / 12) : r.cycle === "quarterly" ? Math.round(a / 3) : r.cycle === "weekly" ? Math.round((a * 52) / 12) : a; };
 
 function occurrences(r, start, end) {
   const day = Number(r.billing_day) || 1;
@@ -179,7 +179,9 @@ function occurrences(r, start, end) {
   }
   let [y, m] = D.parts(start);
   while (D.ymd(y, m, 1) < end) {
-    if (r.cycle !== "yearly" || (Number(r.billing_month) || 1) === m) { const d = D.clamp(y, m, day); if (d >= start && d < end) out.push(d); }
+    const bm = Number(r.billing_month) || 1;
+    const hit = r.cycle === "yearly" ? bm === m : r.cycle === "quarterly" ? (((m - bm) % 3) + 3) % 3 === 0 : true;
+    if (hit) { const d = D.clamp(y, m, day); if (d >= start && d < end) out.push(d); }
     [y, m] = D.addM(y, m, 1);
   }
   return out;
@@ -617,10 +619,12 @@ function matchCard(p) {
   return same.length === 1 ? same[0].id : null;
 }
 
-function matchRecurring(desc) {
+// 店名が「APPLE COM BILL」のように共通の明細は、金額も一致したときだけ固定費とみなす（match_amount）
+function matchRecurring(desc, amount) {
   const t = kanaKey(desc);
   for (const r of recurring()) {
     if (r.active === false || !r.match_keyword) continue;
+    if (r.match_amount && amount != null && Number(amount) !== Number(r.amount)) continue;
     if (r.match_keyword.split(",").some((k) => kanaKey(k) && t.includes(kanaKey(k)))) return r.id;
   }
   return null;
@@ -771,7 +775,7 @@ async function readReceipts(mcp, sample, since, seen, summary, touchedMonths) {
       }
       const category = type === "income" ? "収入・返金" : cats.includes(r.category) ? r.category : guessCategory(description);
       touchedMonths.add(addTx({ date, amount, type, category, account_id: accountId, description,
-        memo: r.card_last4 ? `カード下4桁 ${String(r.card_last4).slice(-4)}` : "", recurring_id: type === "expense" ? matchRecurring(description) : null,
+        memo: r.card_last4 ? `カード下4桁 ${String(r.card_last4).slice(-4)}` : "", recurring_id: type === "expense" ? matchRecurring(description, amount) : null,
         source: "receipt", mail_id: m.id }));
       summary.receipts++;
       logMail({ ...base, status: "receipt", detail: `${description} ${amount.toLocaleString()}円（${category}）` });
@@ -839,7 +843,7 @@ async function syncGmail({ silent = false } = {}) {
           Math.abs(D.parse(t.date) - D.parse(u.date)) <= 3 && (generic(t.description) || generic(u.description) || (fromFlash(t) && !p.flash)));
         if (twin) {
           if (generic(twin.description) && !generic(u.description)) {
-            const rec = type === "expense" ? matchRecurring(u.description) : null;
+            const rec = type === "expense" ? matchRecurring(u.description, u.amount) : null;
             Object.assign(twin, { description: u.description, recurring_id: twin.recurring_id || rec,
               category: twin.category === "未分類" || twin.category === guessCategory(twin.description) ? (u.refund ? "収入・返金" : learnedCategory(u.description) || guessCategory(u.description)) : twin.category });
           } else if (!generic(u.description) && !String(twin.memo || "").includes(u.description)) {
@@ -851,7 +855,7 @@ async function syncGmail({ silent = false } = {}) {
           continue;
         }
         touchedMonths.add(addTx({ date: u.date, amount: u.amount, type, category: u.refund ? "収入・返金" : learnedCategory(u.description) || guessCategory(u.description), account_id: accountId,
-          description: u.description, recurring_id: type === "expense" ? matchRecurring(u.description) : null, source: "gmail", mail_id: m.id, ...(p.flash ? { flash: true } : {}) }));
+          description: u.description, recurring_id: type === "expense" ? matchRecurring(u.description, u.amount) : null, source: "gmail", mail_id: m.id, ...(p.flash ? { flash: true } : {}) }));
         summary.imported++;
         logMail({ ...base, status: "imported", detail: accountId ? "" : "カード未登録のため口座なしで記録" });
       }
@@ -1480,7 +1484,7 @@ txForm.addEventListener("submit", async (e) => {
   if (!f.date || !(f.amount > 0)) { toast("日付と金額を入れてください"); return; }
   const own = f.own_share != null && f.own_share >= 0 && f.own_share < f.amount ? Math.round(f.own_share) : null;
   const tx = { date: f.date, amount: Math.round(f.amount), own_share: own, type: f.type || "expense", category: f.category || (f.type === "income" ? "収入" : guessCategory(f.description)),
-    account_id: f.account_id || null, description: f.description, memo: f.memo, recurring_id: f.recurring_id || (f.type === "expense" ? matchRecurring(f.description) : null) };
+    account_id: f.account_id || null, description: f.description, memo: f.memo, recurring_id: f.recurring_id || (f.type === "expense" ? matchRecurring(f.description, Math.round(f.amount)) : null) };
   await ensureMonths([D.ym(f.date)]);
   if (f.id) {
     const [ym, i] = findTx(f.id);
@@ -1564,13 +1568,13 @@ async function importCsv(buf, accountId, dryRun) {
         const genericMail = !dup.description || /のご利用$/.test(dup.description);
         if (genericMail) rest.description = it.description;
         touched.add(addTx({ ...rest, date: it.date, account_id: accountId, memo: genericMail ? dup.memo : [dup.memo, `明細: ${it.description}`].filter(Boolean).join(" / "),
-          category: dup.category === "未分類" ? it.category : dup.category, recurring_id: dup.recurring_id || matchRecurring(it.description) || matchRecurring(dup.description), source: "csv", h }));
+          category: dup.category === "未分類" ? it.category : dup.category, recurring_id: dup.recurring_id || matchRecurring(it.description, it.amount) || matchRecurring(dup.description, it.amount), source: "csv", h }));
       }
       continue;
     }
     inserted++;
     if (!dryRun) {
-      const recId = it.type === "expense" ? matchRecurring(it.description) : null;
+      const recId = it.type === "expense" ? matchRecurring(it.description, it.amount) : null;
       const rec = recId && recurring().find((r) => r.id === recId);
       // 固定費と照合できたら、その固定費のカテゴリを使う（楽天証券投信積立 → 投資 など）
       const category = it.category === "未分類" && rec ? rec.category || REC_LABELS[rec.kind] : it.category;
@@ -1700,7 +1704,7 @@ accForm.addEventListener("reset", () => setTimeout(() => { idField(accForm).valu
 
 // ------------------------------------------------------------------ 固定費・サブスク
 const recForm = $("#recurring-form");
-const syncRecFields = () => $$(".yearly-only", recForm).forEach((el) => (el.hidden = recForm.cycle.value !== "yearly"));
+const syncRecFields = () => $$(".yearly-only", recForm).forEach((el) => (el.hidden = !["yearly", "quarterly"].includes(recForm.cycle.value)));
 recForm.addEventListener("change", syncRecFields);
 syncRecFields();
 
@@ -1713,7 +1717,7 @@ function renderRecurring() {
     const total = groups[k].filter((r) => r.active !== false).reduce((s, r) => s + monthlyEq(r), 0);
     return `<h3>${REC_LABELS[k]} <span class="muted small">月 ${yen(total)}・年 ${yen(total * 12)}</span></h3><div class="list">${groups[k].map((r) => `
       <div class="item" style="${r.active !== false ? "" : "opacity:.5"}"><div><div class="title">${esc(r.name)}${r.variable ? '<span class="tag">変動</span>' : ""}${r.active !== false ? "" : '<span class="tag">解約済み</span>'}</div>
-        <div class="meta">${CYCLE_LABELS[r.cycle] || ""}${r.cycle === "yearly" && r.billing_month ? `${r.billing_month}月` : ""}${r.billing_day ? `${r.billing_day}日` : ""}${accName(r.account_id) ? `・${esc(accName(r.account_id))}` : ""}${r.note ? `・${esc(r.note)}` : ""}</div></div>
+        <div class="meta">${CYCLE_LABELS[r.cycle] || ""}${(r.cycle === "yearly" || r.cycle === "quarterly") && r.billing_month ? `${r.cycle === "quarterly" ? "（" : ""}${r.billing_month}月${r.cycle === "quarterly" ? "〜）" : ""}` : ""}${r.billing_day ? `${r.billing_day}日` : ""}${accName(r.account_id) ? `・${esc(accName(r.account_id))}` : ""}${r.note ? `・${esc(r.note)}` : ""}</div></div>
         <div class="right"><div class="title">${yen(r.amount)}</div>${r.cycle !== "monthly" ? `<div class="meta">月 ${yen(monthlyEq(r))}</div>` : ""}
           <div><button class="link-btn" data-edit-rec="${esc(r.id)}" type="button">編集</button><button class="link-btn danger" data-del-rec="${esc(r.id)}" type="button">${pendingDelete === r.id ? "本当に削除" : "削除"}</button></div></div></div>`).join("")}</div>`;
   }).join("") || `<p class="muted">家賃・電気・ガス・水道・スマホ・ネット回線・サブスク・NISA積立などを登録しましょう。</p>`;
